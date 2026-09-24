@@ -14,11 +14,22 @@ const TOKEN_TIMEOUT = { normal: "12h", remember: "30d" };
 
 db.load();
 
-// Auto-Seed beim Start: Wenn SEED_FILE gesetzt ist (z.B. auf Render) und noch
-// keine Dutys existieren (frische/geleerte Daten), werden die geseedeten Dutys
-// aus seed/duties.json importiert.
+// Auto-Seed beim Start: Wenn SEED_FILE gesetzt ist, wird der wiederverwendbare
+// Tagesplan (seed/duties.json) importiert – idempotent (Shift-ID "tpl-tagesplan").
 const seedCount = db.importDutiesFromFile(process.env.SEED_FILE);
-if (seedCount) console.log(`Seed: ${seedCount} Dutys automatisch importiert (${process.env.SEED_FILE}).`);
+if (seedCount) console.log(`Seed: ${seedCount} Tagesplan-Dutys importiert (${process.env.SEED_FILE}).`);
+
+// ---------- Rollen ----------
+const ROLE_LABELS = {
+  supervisor: "Supervisor",
+  senior: "Senior Busfahrer",
+  user: "Busfahrer",
+};
+const DRIVER_ROLES = ["user", "senior"];
+
+function roleLabel(r) {
+  return ROLE_LABELS[r] || r;
+}
 
 // ---------- Hilfsfunktionen ----------
 
@@ -28,8 +39,8 @@ function publicUser(u) {
     id: u.id,
     username: u.username,
     role: u.role,
-    fdl: u.fdl || [],
-    tf: u.tf || [],
+    roleLabel: roleLabel(u.role),
+    linien: u.linien || [],
     suspended: !!u.suspended,
     protected: !!u.protected,
     createdAt: u.createdAt,
@@ -55,16 +66,38 @@ function effectiveVehicle(duty) {
   return t ? t.vehicleId : null;
 }
 
-function hasTfLicense(user, vehicleId) {
-  if (!vehicleId) return true; // ohne Fahrzeug keine Lizenzpruefung noetig
-  return (user.tf || []).includes(vehicleId);
+// Lizenzprüfung beruht jetzt auf LINIEN (19, (SB)24, 8, N1), nicht mehr auf Fahrzeugen.
+function hasLineLicense(user, linieId) {
+  if (!linieId) return true; // ohne Linie keine Lizenzpruefung noetig
+  return (user.linien || []).includes(linieId);
+}
+
+function vehicleById(id) {
+  return db.load().fahrzeuge.find((f) => f.id === id) || null;
+}
+
+function minuteKey(dep, overnight) {
+  const s = String(dep || "");
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (!m) return 0;
+  let v = Number(m[1]) * 60 + Number(m[2]);
+  if (overnight && Number(m[1]) < 12) v += 24 * 60; // Morgenfahrten gehören zum Folgetag
+  return v;
+}
+
+// Overnight-Dutys (Start ab 20 Uhr oder vor 5 Uhr) sortieren 00:xx-Fahrten ans Ende,
+// damit Nachtlinien (z. B. N1 ab 23:20) chronologisch richtig stehen.
+function isOvernight(duty) {
+  const m = /^(\d{1,2})/.exec(String(duty.startTime || ""));
+  if (!m) return false;
+  const h = Number(m[1]);
+  return h >= 20 || h < 5;
 }
 
 function sortTrips(duty) {
   if (!duty.trips) duty.trips = [];
-  duty.trips.sort((a, b) =>
-    (a.dep || a.from || "").toString().localeCompare(b.dep || b.from || "")
-  );
+  const overnight = isOvernight(duty);
+  duty.trips.sort((a, b) => minuteKey(a.dep, overnight) - minuteKey(b.dep, overnight));
   return duty;
 }
 
@@ -138,32 +171,29 @@ app.get("/api/users", requireAuth, requireSupervisor, (req, res) => {
 
 app.post("/api/users", async (req, res) => {
   const data = db.load();
-  // Kein Nutzer vorhanden -> erster Nutzer darf sich als Supervisor anlegen (Bootstrap)
+  // Bootstrap: erster Nutzer wird automatisch Supervisor.
   if (data.users.length > 0) {
-    if (!authToken(req) || !req.user || req.user.role !== "supervisor") {
-      const payload = authToken(req);
-      if (!payload) return res.status(401).json({ error: "Nicht angemeldet" });
-      const u2 = data.users.find((x) => x.id === payload.sub);
-      if (!u2) return res.status(401).json({ error: "Unbekannter Nutzer" });
-      if (u2.suspended) return res.status(403).json({ error: "Konto gesperrt" });
-      if (u2.role !== "supervisor") return res.status(403).json({ error: "Nur Supervisor erlaubt" });
-    }
+    const payload = authToken(req);
+    if (!payload) return res.status(401).json({ error: "Nicht angemeldet" });
+    const u2 = data.users.find((x) => x.id === payload.sub);
+    if (!u2) return res.status(401).json({ error: "Unbekannter Nutzer" });
+    if (u2.suspended) return res.status(403).json({ error: "Konto gesperrt" });
+    if (u2.role !== "supervisor") return res.status(403).json({ error: "Nur Supervisor erlaubt" });
   }
-  const { username, password, fdl, tf } = req.body || {};
+  const { username, password, role, linien } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: "Benutzername und Passwort fehlen" });
   }
   if (data.users.some((u) => u.username.toLowerCase() === username.trim().toLowerCase())) {
     return res.status(400).json({ error: "Benutzername existiert bereits" });
   }
-  const role = data.users.length === 0 ? "supervisor" : "user";
+  const validRole = DRIVER_ROLES.includes(role) || role === "supervisor" ? role : "user";
   const user = {
     id: db.uid(),
     username: username.trim(),
     passwordHash: await bcrypt.hash(password, 10),
-    role,
-    fdl: fdl || [],
-    tf: tf || [],
+    role: validRole,
+    linien: Array.isArray(linien) ? linien : [],
     suspended: false,
     createdAt: new Date().toISOString(),
   };
@@ -179,9 +209,9 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
   if (user.protected) {
     return res.status(403).json({ error: "Dieser Nutzer ist geschützt und kann nicht verändert werden" });
   }
-  const { fdl, tf, suspended, password } = req.body || {};
-  if (Array.isArray(fdl)) user.fdl = fdl;
-  if (Array.isArray(tf)) user.tf = tf;
+  const { role, linien, suspended, password } = req.body || {};
+  if (role && (role === "supervisor" || DRIVER_ROLES.includes(role))) user.role = role;
+  if (Array.isArray(linien)) user.linien = linien;
   if (typeof suspended === "boolean") user.suspended = suspended;
   if (password) user.passwordHash = await bcrypt.hash(password, 10);
   db.save();
@@ -192,9 +222,8 @@ app.post("/api/users/:id/licenses", requireAuth, requireSupervisor, (req, res) =
   const data = db.load();
   const user = data.users.find((u) => u.id === req.params.id);
   if (!user) return res.status(404).json({ error: "Nutzer nicht gefunden" });
-  const { fdl = [], tf = [] } = req.body || {};
-  user.fdl = Array.from(new Set([...(user.fdl || []), ...fdl]));
-  user.tf = Array.from(new Set([...(user.tf || []), ...tf]));
+  const { linien = [] } = req.body || {};
+  user.linien = Array.from(new Set([...(user.linien || []), ...linien]));
   db.save();
   res.json({ user: publicUser(user) });
 });
@@ -226,6 +255,7 @@ app.delete("/api/users/:id", requireAuth, requireSupervisor, (req, res) => {
   }
   const [removed] = data.users.splice(i, 1);
   data.wishes = data.wishes.filter((w) => w.userId !== removed.id);
+  data.applications = data.applications.filter((a) => a.userId !== removed.id);
   data.duties.forEach((d) => {
     if (d.assignedUserId === removed.id) d.assignedUserId = null;
   });
@@ -233,29 +263,32 @@ app.delete("/api/users/:id", requireAuth, requireSupervisor, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Kataloge (Lizenzen) ----------
+// ---------- Kataloge: Linien (Lizenzen) & Fahrzeuge ----------
 
-app.get("/api/stellwerke", requireAuth, (req, res) => {
-  res.json({ items: db.load().stellwerke });
+app.get("/api/linien", requireAuth, (req, res) => {
+  res.json({ items: db.load().linien });
 });
-app.post("/api/stellwerke", requireAuth, requireSupervisor, (req, res) => {
+app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const name = (req.body && req.body.name || "").trim();
   if (!name) return res.status(400).json({ error: "Name fehlt" });
-  if (data.stellwerke.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
-    return res.status(400).json({ error: "Stellwerk existiert bereits" });
+  if (data.linien.some((l) => l.name.toLowerCase() === name.toLowerCase())) {
+    return res.status(400).json({ error: "Linie existiert bereits" });
   }
-  const item = { id: db.uid(), name };
-  data.stellwerke.push(item);
+  const item = { id: db.uid(), name, label: (req.body && req.body.label || name).trim() };
+  data.linien.push(item);
   db.save();
   res.json({ item });
 });
-app.delete("/api/stellwerke/:id", requireAuth, requireSupervisor, (req, res) => {
+app.delete("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
-  const i = data.stellwerke.findIndex((s) => s.id === req.params.id);
-  if (i === -1) return res.status(404).json({ error: "Stellwerk nicht gefunden" });
-  data.stellwerke.splice(i, 1);
-  data.users.forEach((u) => (u.fdl = (u.fdl || []).filter((x) => x !== req.params.id)));
+  const i = data.linien.findIndex((l) => l.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: "Linie nicht gefunden" });
+  data.linien.splice(i, 1);
+  data.users.forEach((u) => (u.linien = (u.linien || []).filter((x) => x !== req.params.id)));
+  data.duties.forEach((d) => {
+    if (d.linieId === req.params.id) d.linieId = null;
+  });
   db.save();
   res.json({ ok: true });
 });
@@ -265,27 +298,55 @@ app.get("/api/fahrzeuge", requireAuth, (req, res) => {
 });
 app.post("/api/fahrzeuge", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
-  const name = (req.body && req.body.name || "").trim();
-  if (!name) return res.status(400).json({ error: "Name fehlt" });
-  if (data.fahrzeuge.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+  const wagennummer = (req.body && req.body.wagennummer || "").trim();
+  if (!wagennummer) return res.status(400).json({ error: "Wagennummer fehlt" });
+  if (data.fahrzeuge.some((f) => String(f.wagennummer) === String(wagennummer))) {
     return res.status(400).json({ error: "Fahrzeug existiert bereits" });
   }
-  const item = { id: db.uid(), name };
+  const item = {
+    id: db.uid(),
+    wagennummer,
+    kennzeichen: (req.body.kennzeichen || "").trim(),
+    typ: (req.body.typ || "").trim(),
+    art: (req.body.art || "").trim(),
+    status: (req.body.status || "einsatzbereit").trim(),
+    ort: (req.body.ort || "").trim(),
+    bemerkung: (req.body.bemerkung || "").trim(),
+  };
   data.fahrzeuge.push(item);
   db.save();
   res.json({ item });
 });
+app.patch("/api/fahrzeuge/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const fz = data.fahrzeuge.find((f) => f.id === req.params.id);
+  if (!fz) return res.status(404).json({ error: "Fahrzeug nicht gefunden" });
+  const { status, ort, bemerkung, kennzeichen, typ, art } = req.body || {};
+  if (typeof status === "string") fz.status = status;
+  if (typeof ort === "string") fz.ort = ort;
+  if (typeof bemerkung === "string") fz.bemerkung = bemerkung;
+  if (typeof kennzeichen === "string") fz.kennzeichen = kennzeichen;
+  if (typeof typ === "string") fz.typ = typ;
+  if (typeof art === "string") fz.art = art;
+  db.save();
+  res.json({ item: fz });
+});
 app.delete("/api/fahrzeuge/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
-  const i = data.fahrzeuge.findIndex((s) => s.id === req.params.id);
+  const i = data.fahrzeuge.findIndex((f) => f.id === req.params.id);
   if (i === -1) return res.status(404).json({ error: "Fahrzeug nicht gefunden" });
   data.fahrzeuge.splice(i, 1);
-  data.users.forEach((u) => (u.tf = (u.tf || []).filter((x) => x !== req.params.id)));
+  data.duties.forEach((d) => {
+    if (d.vehicleId === req.params.id) d.vehicleId = null;
+    (d.trips || []).forEach((t) => {
+      if (t.vehicleId === req.params.id) t.vehicleId = null;
+    });
+  });
   db.save();
   res.json({ ok: true });
 });
 
-// ---------- Shifts ----------
+// ---------- Shifts (mit von–bis-Uhrzeit) ----------
 
 app.get("/api/shifts", requireAuth, (req, res) => {
   const data = db.load();
@@ -295,12 +356,14 @@ app.get("/api/shifts", requireAuth, (req, res) => {
 
 app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
-  const { name, date, notes } = req.body || {};
+  const { name, date, startTime, endTime, notes } = req.body || {};
   if (!name) return res.status(400).json({ error: "Name fehlt" });
   const shift = {
     id: db.uid(),
     name: name.trim(),
     date: date || "",
+    startTime: startTime || "",
+    endTime: endTime || "",
     notes: notes || "",
     createdBy: req.user.id,
     createdAt: new Date().toISOString(),
@@ -314,9 +377,11 @@ app.patch("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const s = data.shifts.find((x) => x.id === req.params.id);
   if (!s) return res.status(404).json({ error: "Shift nicht gefunden" });
-  const { name, date, notes } = req.body || {};
+  const { name, date, startTime, endTime, notes } = req.body || {};
   if (typeof name === "string") s.name = name.trim();
   if (typeof date === "string") s.date = date;
+  if (typeof startTime === "string") s.startTime = startTime;
+  if (typeof endTime === "string") s.endTime = endTime;
   if (typeof notes === "string") s.notes = notes;
   db.save();
   res.json({ shift: s });
@@ -328,8 +393,50 @@ app.delete("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
   if (i === -1) return res.status(404).json({ error: "Shift nicht gefunden" });
   data.shifts.splice(i, 1);
   data.duties = data.duties.filter((d) => d.shiftId !== req.params.id);
+  data.applications = data.applications.filter((a) => a.shiftId !== req.params.id);
+  data.wishes = data.wishes.filter((w) => !data.duties.find((d) => d.id === w.dutyId));
   db.save();
   res.json({ ok: true });
+});
+
+// Kopiert eine Shift inkl. Dutys (ohne Zuteilungen/Stornierungen) in eine neue Shift.
+app.post("/api/shifts/:id/copy", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const src = data.shifts.find((s) => s.id === req.params.id);
+  if (!src) return res.status(404).json({ error: "Shift nicht gefunden" });
+  const { name, date } = req.body || {};
+  const shift = {
+    id: db.uid(),
+    name: (name || src.name + " (Kopie)").trim(),
+    date: date || src.date || "",
+    startTime: src.startTime || "",
+    endTime: src.endTime || "",
+    notes: src.notes || "",
+    createdBy: req.user.id,
+    createdAt: new Date().toISOString(),
+  };
+  data.shifts.push(shift);
+  data.duties
+    .filter((d) => d.shiftId === src.id)
+    .forEach((d) => {
+      data.duties.push({
+        ...d,
+        id: db.uid(),
+        shiftId: shift.id,
+        assignedUserId: null,
+        cancelled: false,
+        cancelNote: "",
+        trips: (d.trips || []).map((t) => ({
+          ...t,
+          id: db.uid(),
+          cancelled: false,
+          cancelNote: "",
+          stops: (t.stops || []).map((s) => ({ ...s, id: db.uid(), cancelled: false })),
+        })),
+      });
+    });
+  db.save();
+  res.json({ shift });
 });
 
 // ---------- Dutys ----------
@@ -340,7 +447,7 @@ app.get("/api/shifts/:id/duties", requireAuth, (req, res) => {
   if (!shift) return res.status(404).json({ error: "Shift nicht gefunden" });
   const duties = data.duties
     .filter((d) => d.shiftId === shift.id)
-    .map((d) => ({ ...d, trips: sortTrips({ ...d }).trips }));
+    .map((d) => enrichDuty(d));
   res.json({ shift, duties });
 });
 
@@ -348,24 +455,43 @@ app.get("/api/duties/:id", requireAuth, (req, res) => {
   const data = db.load();
   const duty = data.duties.find((d) => d.id === req.params.id);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
-  res.json({ duty: { ...duty, trips: sortTrips({ ...duty }).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
+
+function enrichDuty(d) {
+  const data = db.load();
+  const driver = data.users.find((u) => u.id === d.assignedUserId) || null;
+  const line = data.linien.find((l) => l.id === d.linieId) || null;
+  const v = vehicleById(effectiveVehicle(d));
+  return {
+    ...d,
+    trips: sortTrips({ ...d }).trips,
+    linieName: line ? (line.name || line.label) : null,
+    linieLabel: line ? (line.label || line.name) : null,
+    vehicleName: v ? (v.typ || v.wagennummer) : null,
+    vehicleWagennummer: v ? v.wagennummer : null,
+    assignedUsername: driver ? driver.username : null,
+  };
+}
 
 app.post("/api/shifts/:id/duties", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const shift = data.shifts.find((s) => s.id === req.params.id);
   if (!shift) return res.status(404).json({ error: "Shift nicht gefunden" });
-  const { name, vehicleId, notes, unit, startTime, endTime } = req.body || {};
+  const { name, linieId, kurs, vehicleId, notes, unit, startTime, endTime, linienwechsel } = req.body || {};
   if (!name) return res.status(400).json({ error: "Name fehlt" });
   const duty = {
     id: db.uid(),
     shiftId: shift.id,
+    linieId: linieId || null,
+    kurs: kurs || "",
     name: name.trim(),
     vehicleId: vehicleId || null,
     unit: unit || "",
     startTime: startTime || "",
     endTime: endTime || "",
     notes: notes || "",
+    linienwechsel: linienwechsel || "",
     cancelled: false,
     cancelNote: "",
     assignedUserId: null,
@@ -374,31 +500,37 @@ app.post("/api/shifts/:id/duties", requireAuth, requireSupervisor, (req, res) =>
   };
   data.duties.push(duty);
   db.save();
-  res.json({ duty });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const duty = data.duties.find((d) => d.id === req.params.id);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
-  const { name, vehicleId, notes, cancelled, cancelNote, assignedUserId, unit, startTime, endTime } = req.body || {};
+  const { name, linieId, kurs, vehicleId, notes, cancelled, cancelNote, assignedUserId, unit, startTime, endTime, linienwechsel } = req.body || {};
   let notifyAssign = false;
   if (typeof name === "string") duty.name = name.trim();
+  if (typeof linieId !== "undefined") duty.linieId = linieId;
+  if (typeof kurs === "string") duty.kurs = kurs;
   if (typeof vehicleId !== "undefined") duty.vehicleId = vehicleId;
   if (typeof notes === "string") duty.notes = notes;
   if (typeof unit === "string") duty.unit = unit;
   if (typeof startTime === "string") duty.startTime = startTime;
   if (typeof endTime === "string") duty.endTime = endTime;
+  if (typeof linienwechsel === "string") duty.linienwechsel = linienwechsel;
   if (typeof cancelNote === "string") duty.cancelNote = cancelNote;
   if (typeof cancelled === "boolean") {
     duty.cancelled = cancelled;
     if (cancelled) notify(duty.assignedUserId, `Duty ${duty.name} entfällt. ${cancelNote || ""}`.trim(), "danger");
   }
   if (typeof assignedUserId !== "undefined") {
-    const vehicleId2 = effectiveVehicle(duty);
-    const driver = data.users.find((u) => u.id === assignedUserId);
-    if (assignedUserId && (!driver || !hasTfLicense(driver, vehicleId2))) {
-      return res.status(400).json({ error: "Fahrer hat keine TF-Lizenz für das Fahrzeug der Duty" });
+    if (assignedUserId) {
+      const driver = data.users.find((u) => u.id === assignedUserId);
+      if (!driver) return res.status(400).json({ error: "Unbekannter Fahrer" });
+      if (driver.suspended) return res.status(400).json({ error: "Fahrer ist gesperrt" });
+      if (!hasLineLicense(driver, duty.linieId)) {
+        return res.status(400).json({ error: "Fahrer hat keine Linien-Lizenz für diese Duty" });
+      }
     }
     duty.assignedUserId = assignedUserId;
     if (assignedUserId) notifyAssign = true;
@@ -407,7 +539,7 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   if (notifyAssign) {
     notify(req.body.assignedUserId, `Du wurdest der Duty "${duty.name}" zugeteilt.`, "success");
   }
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.post("/api/duties/:id/vehicle", requireAuth, requireSupervisor, (req, res) => {
@@ -425,7 +557,7 @@ app.post("/api/duties/:id/vehicle", requireAuth, requireSupervisor, (req, res) =
   if (duty.assignedUserId) {
     notify(duty.assignedUserId, `Fahrzeug der Duty "${duty.name}" wurde geändert.`, "warning");
   }
-  res.json({ duty });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.post("/api/duties/:id/trips", requireAuth, requireSupervisor, (req, res) => {
@@ -448,7 +580,7 @@ app.post("/api/duties/:id/trips", requireAuth, requireSupervisor, (req, res) => 
   duty.trips.push(trip);
   duty.trips = sortTrips(duty).trips;
   db.save();
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.patch("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req, res) => {
@@ -469,7 +601,7 @@ app.patch("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req,
   }
   if (typeof cancelNote === "string") trip.cancelNote = cancelNote;
   db.save();
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.delete("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req, res) => {
@@ -478,7 +610,7 @@ app.delete("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
   duty.trips = (duty.trips || []).filter((t) => t.id !== req.params.tripId);
   db.save();
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.post("/api/duties/:id/trips/:tripId/stops", requireAuth, requireSupervisor, (req, res) => {
@@ -491,7 +623,7 @@ app.post("/api/duties/:id/trips/:tripId/stops", requireAuth, requireSupervisor, 
   if (!station) return res.status(400).json({ error: "Station fehlt" });
   trip.stops.push({ id: db.uid(), station, arr: arr || "", dep: dep || "", cancelled: false });
   db.save();
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.patch("/api/duties/:id/trips/:tripId/stops/:stopId", requireAuth, requireSupervisor, (req, res) => {
@@ -508,7 +640,7 @@ app.patch("/api/duties/:id/trips/:tripId/stops/:stopId", requireAuth, requireSup
   if (typeof dep === "string") stop.dep = dep;
   if (typeof cancelled === "boolean") stop.cancelled = cancelled;
   db.save();
-  res.json({ duty: { ...duty, trips: sortTrips(duty).trips } });
+  res.json({ duty: enrichDuty(duty) });
 });
 
 app.delete("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
@@ -529,16 +661,15 @@ app.get("/api/wishes", requireAuth, requireSupervisor, (req, res) => {
     const duty = data.duties.find((d) => d.id === w.dutyId);
     const user = data.users.find((u) => u.id === w.userId);
     const shift = duty ? data.shifts.find((s) => s.id === duty.shiftId) : null;
+    const v = duty ? vehicleById(effectiveVehicle(duty)) : null;
     return {
       ...w,
       dutyName: duty ? duty.name : "?",
+      linie: duty ? ((data.linien.find((l) => l.id === duty.linieId) || {}).name || "") : "",
       shiftName: shift ? shift.name : "?",
       shiftId: duty ? duty.shiftId : null,
       username: user ? user.username : "?",
-      vehicleName:
-        duty && effectiveVehicle(duty)
-          ? (data.fahrzeuge.find((f) => f.id === effectiveVehicle(duty)) || {}).name
-          : null,
+      vehicleName: (v && (v.typ || v.wagennummer)) || null,
     };
   });
   res.json({ wishes: items });
@@ -548,9 +679,8 @@ app.post("/api/duties/:id/wish", requireAuth, (req, res) => {
   const data = db.load();
   const duty = data.duties.find((d) => d.id === req.params.id);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
-  const vehicleId = effectiveVehicle(duty);
-  if (!hasTfLicense(req.user, vehicleId)) {
-    return res.status(400).json({ error: "Keine TF-Lizenz für das Fahrzeug dieser Duty" });
+  if (!hasLineLicense(req.user, duty.linieId)) {
+    return res.status(400).json({ error: "Keine Linien-Lizenz für diese Duty" });
   }
   if (duty.assignedUserId === req.user.id) {
     return res.status(400).json({ error: "Du bist dieser Duty bereits zugeteilt" });
@@ -577,10 +707,9 @@ app.post("/api/wishes/:id/accept", requireAuth, requireSupervisor, (req, res) =>
   if (!wish) return res.status(404).json({ error: "Wunsch nicht gefunden" });
   const duty = data.duties.find((d) => d.id === wish.dutyId);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
-  const vehicleId2 = effectiveVehicle(duty);
   const user = data.users.find((u) => u.id === wish.userId);
-  if (!hasTfLicense(user, vehicleId2)) {
-    return res.status(400).json({ error: "Fahrer hat keine TF-Lizenz für das Fahrzeug" });
+  if (!user || !hasLineLicense(user, duty.linieId)) {
+    return res.status(400).json({ error: "Fahrer hat keine Linien-Lizenz für diese Duty" });
   }
   wish.status = "accepted";
   duty.assignedUserId = wish.userId;
@@ -603,6 +732,98 @@ app.post("/api/wishes/:id/deny", requireAuth, requireSupervisor, (req, res) => {
 app.delete("/api/wishes/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   data.wishes = data.wishes.filter((w) => w.id !== req.params.id);
+  db.save();
+  res.json({ ok: true });
+});
+
+// ---------- Shift-Anmeldungen ----------
+// Fahrer melden sich mit Text für eine Shift an; der Supervisor sieht alle und
+// teilt sie danach manuell Dutys zu (Lizenzprüfung dort).
+
+app.get("/api/applications", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const items = data.applications.map((a) => {
+    const user = data.users.find((u) => u.id === a.userId);
+    const shift = data.shifts.find((s) => s.id === a.shiftId);
+    return {
+      ...a,
+      username: user ? user.username : "?",
+      roleLabel: user ? roleLabel(user.role) : "?",
+      linien: user ? (user.linien || []) : [],
+      shiftName: shift ? shift.name : "?",
+      shiftDate: shift ? shift.date : "",
+      shiftStart: shift ? shift.startTime : "",
+      shiftEnd: shift ? shift.endTime : "",
+    };
+  });
+  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json({ applications: items });
+});
+
+// Fahrer: eigene Shift-Anmeldungen ansehen.
+app.get("/api/my/applications", requireAuth, (req, res) => {
+  const data = db.load();
+  const items = data.applications
+    .filter((a) => a.userId === req.user.id)
+    .map((a) => {
+      const shift = data.shifts.find((s) => s.id === a.shiftId);
+      return {
+        ...a,
+        shiftName: shift ? shift.name : "?",
+        shiftDate: shift ? shift.date : "",
+        shiftStart: shift ? shift.startTime : "",
+        shiftEnd: shift ? shift.endTime : "",
+      };
+    });
+  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json({ applications: items });
+});
+
+app.post("/api/shifts/:id/apply", requireAuth, (req, res) => {
+  const data = db.load();
+  const shift = data.shifts.find((s) => s.id === req.params.id);
+  if (!shift) return res.status(404).json({ error: "Shift nicht gefunden" });
+  const note = (req.body && req.body.note || "").trim();
+  if (data.applications.find((a) => a.shiftId === shift.id && a.userId === req.user.id && a.status !== "denied")) {
+    return res.status(400).json({ error: "Du bist für diese Shift bereits angemeldet" });
+  }
+  const app2 = {
+    id: db.uid(),
+    shiftId: shift.id,
+    userId: req.user.id,
+    note,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+  data.applications.push(app2);
+  db.save();
+  notify("all-supervisors", `${req.user.username} hat sich für "${shift.name}" angemeldet.`, "apply");
+  res.json({ application: app2 });
+});
+
+app.post("/api/applications/:id/accept", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const a = data.applications.find((x) => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
+  a.status = "accepted";
+  db.save();
+  notify(a.userId, "Deine Shift-Anmeldung wurde angenommen.", "success");
+  res.json({ ok: true });
+});
+
+app.post("/api/applications/:id/deny", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const a = data.applications.find((x) => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
+  a.status = "denied";
+  db.save();
+  notify(a.userId, "Deine Shift-Anmeldung wurde abgelehnt.", "danger");
+  res.json({ ok: true });
+});
+
+app.delete("/api/applications/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  data.applications = data.applications.filter((a) => a.id !== req.params.id);
   db.save();
   res.json({ ok: true });
 });
@@ -643,7 +864,7 @@ app.post("/api/notifications/read-all", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Fahrzeugübersicht ----------
+// ---------- Fahrzeugübersicht (für alle Rollen) ----------
 
 function dutyTimeRange(duty) {
   let first = null;
@@ -683,26 +904,27 @@ app.get("/api/vehicles/overview", requireAuth, (req, res) => {
         });
       }
     });
-    uses.sort((a, b) => (a.dep || "").localeCompare(b.dep || ""));
+    uses.sort((a, b) => (a.dep || "").localeCompare(b.dep || "", "de", { numeric: true }));
     let status = "kein Einsatz";
     if (uses.length) {
-      // Prüfen: läuft gerade?
-      const active = uses.find((u) => {
-        if (!u.dep) return false;
-        // nur vergleichen, wenn Datum gleich heute ist
-        const today = now.toISOString().slice(0, 10);
-        if (u.shiftDate && u.shiftDate !== today) return false;
-        return true;
-      });
+      const today = now.toISOString().slice(0, 10);
+      const active = uses.find((u) => u.shiftDate && u.shiftDate === today);
       status = active ? "im Einsatz (heute)" : "eingeplant";
     }
     let spawn = null;
     const cand = uses.find((u) => u.from);
     if (cand) spawn = { from: cand.from, dutyName: cand.dutyName, dep: cand.dep, shiftDate: cand.shiftDate };
+
     return {
       id: f.id,
-      name: f.name,
-      status,
+      wagennummer: f.wagennummer,
+      kennzeichen: f.kennzeichen,
+      typ: f.typ,
+      art: f.art,
+      status: f.status, // einsatzbereit / nicht_einsatzbereit / sonderfahrzeug / ersatzwagen / fahrschule / reserve
+      ort: f.ort,
+      bemerkung: f.bemerkung,
+      einsatzStatus: status, // kein Einsatz / eingeplant / im Einsatz (heute)
       uses,
       spawn,
     };
@@ -710,16 +932,74 @@ app.get("/api/vehicles/overview", requireAuth, (req, res) => {
   res.json({ vehicles: result });
 });
 
+// ---------- Warn-System (Würste: ab 3 Stunden muss abgearbeitet werden) ----------
+
+app.get("/api/warns", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const items = data.warns.map((w) => {
+    const user = data.users.find((u) => u.id === w.userId);
+    return { ...w, username: user ? user.username : "?" };
+  });
+  items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  res.json({ warns: items });
+});
+
+app.post("/api/warns", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const { userId, grund, stunden, frist } = req.body || {};
+  if (!userId) return res.status(400).json({ error: "Nutzer fehlt" });
+  const warn = {
+    id: db.uid(),
+    userId,
+    grund: (grund || "").trim(),
+    stunden: Number(stunden) || 0,
+    abgearbeitet: 0,
+    abgeschlossen: false,
+    frist: frist || "",
+    createdAt: new Date().toISOString(),
+  };
+  data.warns.push(warn);
+  db.save();
+  const user = data.users.find((u) => u.id === userId);
+  notify(userId, `Du hast eine Warnung erhalten (${warn.stunden} Std. Strafe). ${warn.grund}`.trim(), "danger");
+  res.json({ warn, username: user ? user.username : "?" });
+});
+
+app.patch("/api/warns/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const warn = data.warns.find((w) => w.id === req.params.id);
+  if (!warn) return res.status(404).json({ error: "Warnung nicht gefunden" });
+  const { grund, stunden, abgearbeitet, abgeschlossen, frist, userId } = req.body || {};
+  if (typeof grund === "string") warn.grund = grund;
+  if (typeof frist === "string") warn.frist = frist;
+  if (typeof userId !== "undefined") warn.userId = userId;
+  if (typeof stunden === "number") warn.stunden = stunden;
+  if (typeof abgearbeitet === "number") warn.abgearbeitet = abgearbeitet;
+  if (typeof abgeschlossen === "boolean") warn.abgeschlossen = abgeschlossen;
+  db.save();
+  res.json({ warn });
+});
+
+app.delete("/api/warns/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  data.warns = data.warns.filter((w) => w.id !== req.params.id);
+  db.save();
+  res.json({ ok: true });
+});
+
 // ---------- Health / Monitoring ----------
 
 app.get("/api/health", (req, res) => {
+  const data = db.load();
   res.json({
     ok: true,
     service: "vbg-website",
     uptime: Math.round(process.uptime()),
     started: new Date(Date.now() - process.uptime() * 1000).toISOString(),
     time: new Date().toISOString(),
-    duties: db.load().duties.length,
+    duties: data.duties.length,
+    users: data.users.length,
+    fahrzeuge: data.fahrzeuge.length,
   });
 });
 app.get("/healthz", (req, res) => res.json({ ok: true }));

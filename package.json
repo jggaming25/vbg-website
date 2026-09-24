@@ -6,8 +6,7 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",
-    "seed": "node server/seed.js",
-    "seed:export": "node server/seed.js --export"
+    "seed": "node seed/generate-day.js"
   },
   "engines": {
     "node": ">=18"

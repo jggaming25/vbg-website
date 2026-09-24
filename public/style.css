@@ -260,6 +260,28 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .spinner { color: var(--muted); padding: 40px; text-align: center; }
 .crown { color: var(--yellow); font-size: 12px; vertical-align: middle; }
 
+/* ---------- Supervisor-Tabs ---------- */
+.tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.tabs .tab {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.tabs .tab:hover { filter: brightness(1.15); }
+.tabs .tab.active {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #04121c;
+  font-weight: 700;
+}
+
+/* ---------- Warnungen ---------- */
+.warn-hot { background: rgba(248,113,113,.07); }
+.warn-hot td { border-bottom-color: rgba(248,113,113,.3); }
+
 @media (max-width: 700px) {
   .notif-drop { width: 300px; right: -120px; }
   .userbox .name { display: none; }

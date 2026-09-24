@@ -1,9 +1,9 @@
 # VBG Website
 
-Organisationstool für **FDL & TF** (Railway-Community):
-Shifts mit Dutys (Fahrten + Halte), Lizenzen (Stellwerke / Fahrzeuge),
-Zuteilung mit Wunsch-System, Benachrichtigungen (Desktop + In-App) und
-Fahrzeugübersicht.
+Organisationstool für den **Busbetrieb VBG**:
+Shifts mit Dutys (Fahrten + Halte), **linienbasierte Lizenzen** (19, (SB) 24, 8, N1),
+Shift-Anmeldungen mit manueller Zuteilung, Wunsch-System, Warn-System und
+Fahrzeugübersicht mit supervisor-gesteuertem Status.
 
 ## Tech-Stack
 
@@ -16,26 +16,29 @@ Fahrzeugübersicht.
 ## Funktionen
 
 - **Login** mit *"Angemeldet bleiben"* (Token 30 Tage im localStorage)
-- **Rollen:** Supervisor (verwaltet alles) und normale Nutzer (FDL/TF)
-- **Lizenzen:**
-  - FDL → Stellwerke (Start: AK, STB, NS, BHBF) – Supervisor kann beliebig viele anlegen
-  - TF → Fahrzeuge (Start: 628, 429, 245 (Dosto)) – beliebig erweiterbar
-  - Beim **Anlegen** eines Nutzers wählt der Supervisor Lizenzen direkt aus,
-    nachträglich können jederzeit Lizenzen ergänzt/geändert werden
-  - Konten können **gesperrt** und **gelöscht** werden
-- **Shifts & Dutys:**
-  - Erst Shift anlegen, dann Dutys je Shift
-  - Duty = mehrere **Fahrten**, Fahrt = mehrere **Halte**
-  - Dutys zeigen zusätzlich **Einheit** (z.B. 628 001) und **Dienstzeit** (Anfang–Ende)
-  - Fahrten können **mit Vermerk entfallen** (einzelne Fahrt **oder** ganze Duty)
-  - Halte einzelner Fahrten können gestrichen werden
-  - Fahrzeug der Duty ist **einzeln pro Fahrt** oder **für alle Fahrten** änderbar
-- **Zuteilung:** Fahrer können Dutys **wünschen** – nur mit passender TF-Lizenz.
-  Supervisor nimmt an/lehnt ab oder weist direkt zu.
-- **Benachrichtigungen:** In-App-Box oben rechts (links vom Nutzer-Menü) +
-  **Desktop-Benachrichtigungen** (Browser-Notification), Polling alle 30 s
-- **Fahrzeugübersicht:** Status aller Fahrzeuge automatisch aus allen Dutys
-  berechnet (Einsätze, Zeitfenster, **Spawnpunkt bei Serverstart**), shiftunabhängig.
+- **Rollen:** Supervisor · Senior Busfahrer · Busfahrer
+- **Linien-Lizenzen (Start):** 19 (Stümp Voiskamp ↔ Gravenberg ZOB, Solo),
+  (SB) 24 (Sorenkoppel ↔ Gravenberg ZOB, Gelenk/Solo), 8 (Bf. Gravenberg ↔ Bergdorf, Solo),
+  N1 (Gravenberg ZOB ↔ Sorenkoppel, Gelenk, Nacht). Wer eine Linie besitzt, kann
+  Dutys dieser Linie fahren – unabhängig vom konkreten Fahrzeug.
+- **Wiederverwendbarer Tagesplan:** `seed/generate-day.js` erzeugt einen
+  ganztägigen Plan (25 Fahrzeuge, 10 Dutys, 4 Linien) ohne festes Datum.
+  Per Klick „Als Shift übernehmen" wird er für einen Wochentag kopiert.
+- **Linienwechsel** sind als Hinweis an Dutys hinterlegt (z.B. „Umlauf kann am
+  GVZ auf Linie 19 wechseln").
+- **Shifts mit von–bis-Uhrzeit** (Start/Ende), Dutys je Shift.
+- **Shift-Anmeldungen:** Fahrer melden sich mit einer Nachricht an → Supervisor
+  nimmt an/ab und teilt danach manuell Dutys zu (mit Lizenzprüfung).
+- **Duty-Wünsche** nur bei passender Linien-Lizenz; Supervisor nimmt an/ab.
+- **Fahrzeugübersicht für alle Rollen**: Wagennummer, Kennzeichen, Typ, Standort,
+  Einsatzstatus (kein Einsatz / eingeplant / im Einsatz), geplante Dutys.
+  Der **Status** (einsatzbereit / nicht einsatzbereit / Sonderfahrzeug /
+  Ersatzwagen / Fahrschule / Reserve) ist **nur durch den Supervisor** änderbar.
+- **Warn-System:** Warnungen mit Stundenzahl + Frist; **ab 3 Stunden muss
+  abgearbeitet werden** (Fortschritt wird gepflegt).
+- **Supervisor-Bereich mit Untertabs:** Nutzer · Linien & Lizenzen · Wünsche ·
+  Anmeldungen · Warnungen.
+- **Benachrichtigungen:** In-App-Box + Desktop (Polling alle 30 s).
 
 ## Lokal starten
 
@@ -44,112 +47,62 @@ npm install
 npm start          # -> http://localhost:3000
 ```
 
-Startdaten (Dutys aus dem Organisationsplan) einspielen:
+Wiederverwendbaren Tagesplan (neu) generieren:
 
 ```bash
-npm run seed       # liest automatisch die neueste "TF duty*s.html" aus dem Temp-Ordner
-# oder mit explizitem Pfad:
-node server/seed.js "C:\Pfad\zu\Dutys.html"
+node seed/generate-day.js   # schreibt seed/duties.json
 ```
-
-Das Seed-Skript legt den Shift **"Organisationsplan"** mit ~39 Dutys und 382 Fahrten
-an (Duty 32 fehlt in der Quelldatei). Erneutes Ausführen ist wirkungslos, solange
-schon geseedete Dutys existieren – zum Neu-Seeden `data.json` löschen.
 
 Login: Der **fest verankerte Supervisor** ist automatisch eingerichtet:
 - **Benutzername:** `jggaming2518` · **Passwort:** `Jlg161218MGB!`
 
 Dieser Nutzer wird aus dem Code (`server/db.js`) bei **jedem** Start garantiert
-angelegt (überlebt auch Daten-Resets) und ist **unlöschbar + nicht sperrbar**
-(im Backend hart gesperrt, in der Oberfläche als „geschützt" markiert).
-
-Danach unter `http://localhost:3000` einloggen und über *Nutzer → + Nutzer
-anlegen* weitere Konten mit Lizenzen erstellen.
+angelegt (überlebt auch Daten-Resets) und ist **unlöschbar + nicht sperrbar**.
 
 > **Komplette Schritt-für-Schritt-Anleitung (GitHub + Render + Pages +
-> UptimeRobot + erster Supervisor): `SETUP-ANLEITUNG.md`**
+> erster Supervisor): `SETUP-ANLEITUNG.md`**
+
+## Daten & Seed
+
+`seed/duties.json` enthält den wiederverwendbaren Tagesplan und wird beim
+Serverstart automatisch importiert (Umgebungsvariable `SEED_FILE=seed/duties.json`),
+wenn der Shift `tpl-tagesplan` noch fehlt – idempotent, auch auf Bestandsinstallationen
+nachrüstbar. Ein Reset/Redeploy ist damit unproblematisch.
 
 ## Deploy
 
-> **Health/Monitoring:** Die API stellt Endpunkte zum Überwachen bereit:
-> `GET /api/health` (Infos + Duty-Anzahl) und `GET /healthz` (kurz: `{"ok":true}`).
-> Beide brauchen **kein Login** und sind genau der Weg, den Render-Healthcheck
-> und UptimeRobot nutzen – so bleibt der freie Plan wach und Ausfälle werden erkannt.
+> **Health/Monitoring:** `GET /api/health` und `GET /healthz` ohne Login –
+> genutzt von Render-Healthcheck und UptimeRobot.
 
 ### 1. Render (Backend + Daten)
 
-**Variante A – Blueprint (empfohlen):** Die Datei `render.yaml` im Repo ist schon
-fertig konfiguriert (inkl. automatisch generiertem `JWT_SECRET` und Healthcheck).
-Auf [render.com](https://render.com) → **New → Blueprint → Repo auswählen** → Deploy.
+`render.yaml` ist fertig konfiguriert. Auf [render.com](https://render.com) →
+**New → Blueprint → Repo auswählen** → Deploy.
+Wichtigste Environment-Variablen:
 
-**Variante B – manuell:**
-1. Repo auf GitHub pushen.
-2. Auf [render.com](https://render.com): **New → Web Service → Repo auswählen**.
-3. Einstellungen:
-   - **Build Command:** `npm ci`
-   - **Start Command:** `npm start`
-   - **Health Check Path:** `/api/health`
-4. **Environment Variables:**
-   - `JWT_SECRET` – langes, geheimes Zufalls-Passwort (wichtig für Logins)
-   - `DATA_FILE` – optional, z.B. `/var/data/data.json`
-   - `PORT` – wird von Render automatisch gesetzt
-5. Fertig → URL wie `https://vbg-website.onrender.com` – `.../api/health`
-   wird nach dem ersten Deploy `{"ok":true}` liefern.
-
-> **Hinweis Datenhaltung:** Render (kostenloser/dünner Plan) hält den Disk
-> meist dauerhaft, setzt ihn aber bei *Redeployment* zurück. Für echten
-> produktiven Betrieb: Plan mit persistentem Disk wählen oder ein DB-Add-on
-> (z.B. Supabase) anschließen. Die `data.json` wird von jeder Änderung atomar
-> neu geschrieben. Die geseedeten Dutys liegen zusätzlich committet in
-> `seed/duties.json` und werden beim Serverstart **automatisch importiert**
-> (Umgebungsvariable `SEED_FILE=seed/duties.json`), sobald keine Daten da sind –
-> ein Reset/Redeploy ist damit unproblematisch.
+- `JWT_SECRET` – langes, geheimes Zufallspasswort
+- `DATA_FILE` – optional, z.B. `/var/data/data.json`
+- `SEED_FILE` – `seed/duties.json` (Tagesplan automatisch einspielen)
 
 ### 2. GitHub Pages (Frontend)
 
-Die App wird komplett automatisch deployt – in `public/config.js` zuerst die
-Render-URL eintragen:
-```js
-window.VBG_API_BASE = "https://vbg-website.onrender.com";
-```
-
-Dann in GitHub: **Settings → Pages → Source: „GitHub Actions"**. Der Workflow
-`.github/workflows/pages.yml` baut bei jedem Push auf `main` den Inhalt von
-`public/` und veröffentlicht ihn unter deiner Pages-URL. Die App redet dann mit
-der API auf Render.
-
-(Alternativ: Frontend direkt via Render ausliefern lassen – geht automatisch,
-`public/` wird vom Express-Server mit ausgeliefert.)
-
-### 3. UptimeRobot (Uptime-Bot/-Monitor)
-
-Render quollt bei freien Plänen nach ~15 min in den Schlaf, der erste Request
-braucht dann ~30–60 s. Mit UptimeRobot wach halten und Ausfälle melden:
-
-1. [uptimerobot.com](https://uptimerobot.com) → **New Monitor**
-2. **HTTP(s)**, URL `https://vbg-website.onrender.com/api/health`,
-   Interval z.B. 5 min, Timeout 30 s
-3. Optional: **Alert Contacts**, um bei Ausfall E-Mail/Discord/Telegram zu
-   benachrichtigen (lettuces, kann aber nicht von hier eingerichtet werden).
-4. Fertig – der Monitor pingt den Health-Endpoint und hält den Service wach.
-   Erwartete Antwort: HTTP 200 + `{"ok":true}`.
+In `public/config.js` die Render-URL eintragen (`window.VBG_API_BASE`). Dann in
+GitHub: **Settings → Pages → Source: „GitHub Actions"**. Der Workflow
+`.github/workflows/pages.yml` veröffentlicht `public/` bei jedem Push auf `main`.
 
 ## Projektstruktur
 
 ```
-server/            Express-API (Auth, Nutzer, Lizenzen, Shifts/Dutys, Wünsche, Notifications, Fahrzeuge)
-  server.js        alle Routen + Middleware (+ Health-Endpoints /api/health, /healthz)
-  db.js            JSON-Datenspeicher (data.json)
-  seed.js          Importiert die realen Dutys aus der Google-Sheets-HTML (npm run seed)
+server/            Express-API (Auth, Nutzer, Linien, Shifts/Dutys, Anmeldungen, Wünsche, Warns, Fahrzeuge)
+  server.js        alle Routen + Middleware (+ Health-Endpoints)
+  db.js            JSON-Datenspeicher (data.json) + Migration + geschützter Supervisor + Tagesplan-Import
+seed/
+  generate-day.js  erzeugt den wiederverwendbaren Tagesplan (seed/duties.json)
+  duties.json      Tagesplan-Daten (Shift tpl-tagesplan)
 public/            Frontend (SPA)
-  index.html       Seite
-  style.css        Styles (dunkles Design)
-  app.js           komplette App-Logik
-  api.js           Fetch-Wrapper + Token-Handling ("Angemeldet bleiben")
-  config.js        API-Basis-URL (für Pages setzen)
-  manifest.webmanifest  PWA-Metadaten (Desktop-Notifications)
-render.yaml        Render-Blueprint (Auto-Deploy des Backends)
-.github/workflows/pages.yml   GitHub-Pages-Deploy des Frontends
+  index.html, style.css, app.js, api.js, config.js, manifest.webmanifest
+render.yaml        Render-Blueprint
+.github/workflows/pages.yml   GitHub-Pages-Deploy
 data.json          Daten (wird automatisch angelegt)
 ```
 
@@ -157,5 +110,5 @@ data.json          Daten (wird automatisch angelegt)
 
 - Passwörter werden mit bcrypt gehasht, Tokens sind JWT.
 - `JWT_SECRET` in Produktion unbedingt setzen!
-- Nur der **Supervisor** darf Nutzer verwalten, Lizenzen anlegen, Shifts/Dutys
-  bearbeiten und zuteilen. Fahrer sehen alles lesend und können nur **wünschen**.
+- Nur der **Supervisor** darf Nutzer/Lizenzen/Warnungen verwalten und zuteilen.
+  Fahrer sehen alles lesend und können nur wünschen oder sich für Shifts anmelden.

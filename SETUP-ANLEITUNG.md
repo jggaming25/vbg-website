@@ -32,8 +32,8 @@ anlegen und ein paar URLs setzen.
 # 1. Abhängigkeiten installieren
 npm install
 
-# 2. Dutys einspielen (liest automatisch die Datei "TF duty's…" aus dem Temp-Ordner)
-npm run seed
+# 2. Wiederverwendbaren Tagesplan generieren (einmal, optional)
+node seed/generate-day.js
 
 # 3. Server starten
 npm start
@@ -50,8 +50,8 @@ Er wird bei jedem Start automatisch angelegt, ist **unlöschbar** und
 **nicht sperrbar** (im Nutzer-Menü mit „geschützt" markiert) und übersteht auch
 einen Daten-Reset.
 
-Über **Nutzer → + Nutzer anlegen** weitere Konten mit Lizenzen
-(FDL-Stellwerke und/oder TF-Fahrzeuge) erstellen.
+Über **Supervisor → Nutzer → + Nutzer anlegen** weitere Konten mit Rolle und
+Linien-Lizenzen erstellen (19, (SB) 24, 8, N1).
 
 Zum Beenden: `Strg+C` im Terminal.
 
@@ -108,13 +108,13 @@ git push -u origin main
 ### Nach dem Deploy prüfen
 
 ```bash
-# Muss liefern: {"ok":true,"service":"vbg-website","duties":39,...}
+# Muss liefern: {"ok":true,"service":"vbg-website","duties":10,...}
 curl https://DEIN-SERVICE.onrender.com/api/health
 ```
 
-Die 39 Dutys sind automatisch da (Shift **„Organisationsplan"**), weil beim
-ersten Start `SEED_FILE` die Datei `seed/duties.json` importiert – und der
-fest verankerte Supervisor `jggaming2518` existiert ebenfalls sofort.
+Die 10 Dutys sind automatisch da (Shift **„Tagesplan VBG"** mit allen 4 Linien),
+weil beim ersten Start `SEED_FILE` die Datei `seed/duties.json` importiert – und
+der fest verankerte Supervisor `jggaming2518` existiert ebenfalls sofort.
 
 **Erster Login:** App unter `https://DEIN-SERVICE.onrender.com` öffnen →
 einloggen mit `jggaming2518` / `Jlg161218MGB!`. (Kein curl zum Anlegen nötig.)
@@ -188,19 +188,33 @@ Pages (Frontend)**.
 
 1. **Admin/Login:** Mit `jggaming2518` / `Jlg161218MGB!` einloggen – dieser
    Nutzer ist nicht löschbar/sperrbar.
-2. **Weitere Nutzer:** Unter **Nutzer → + Nutzer anlegen** (Supervisor)
-   Konten mit Benutzername + Passwort + Lizenzen erstellen:
-   - FDL: Stellwerke (z.B. AK, STB, NS, BHBF)
-   - TF: Fahrzeuge (z.B. 628, 429, 245 (Dosto))
-   Lizenzen lassen sich später jederzeit ergänzen/ändern; Konten können
-   gesperrt oder gelöscht werden (außer der geschützte Supervisor).
-3. **Organisation:** **Shifts → Organisationsplan** öffnen → Dutys ansehen.
-   - Fahrer wünschen Dutys (nur mit passender TF-Lizenz), du nimmst an/ab
-     oder weist direkt zu.
-   - Fahrten entfallen lassen (mit Vermerk), Halte streichen, Fahrzeug ändern
-     (einzeln oder für alle Fahrten).
-4. **Fahrzeugübersicht** zeigt automatisch, welches Fahrzeug wann wo eingesetzt
-   ist und wo es bei Serverstart steht.
+2. **Weitere Nutzer:** Unter **Supervisor → Nutzer → + Nutzer anlegen**
+   Konten mit Benutzername + Passwort + **Rolle** (Busfahrer / Senior
+   Busfahrer / Supervisor) + **Linien-Lizenzen** erstellen:
+   - 19 (Stümp Voiskamp ↔ Gravenberg ZOB, Solo-Bus)
+   - (SB) 24 (Sorenkoppel ↔ Gravenberg ZOB, Gelenk/Solo)
+   - 8 (Bf. Gravenberg ↔ Bergdorf, Solo-Bus)
+   - N1 (Gravenberg ZOB ↔ Sorenkoppel, Gelenk, Nacht)
+   Lizenzen lassen sich später jederzeit im Untertab **Linien & Lizenzen**
+   vergeben/entziehen; Konten können gesperrt oder gelöscht werden
+   (außer der geschützte Supervisor).
+3. **Tagesplan als Shift:** Unter **Shifts → Tagesplan VBG → „Als Shift
+   übernehmen"** einen Wochentag kopieren (z.B. „Montag 05.10.") – alle Dutys
+   inkl. Fahrten werden ohne Zuteilung kopiert.
+4. **Planung:** Die kopierte Shift öffnen → Dutys einzelnen Fahrern zuweisen
+   (nur Fahrer mit passender **Linien-Lizenz**; Auswahl zeigt die Kandidaten).
+   Fahrten entfallen lassen (mit Vermerk), Halte streichen, Fahrzeug ändern.
+5. **Anmeldungen:** Fahrer klicken in der Shift auf **„Für diese Shift
+   anmelden"** (mit Nachricht) → du nimmst unter **Supervisor → Anmeldungen**
+   an/ab und teilst die Dutys danach manuell zu. Dutys können Fahrer zusätzlich
+   **wünschen** (nur mit passender Lizenz) → Untertab **Wünsche**.
+6. **Fahrzeugübersicht:** Für alle Rollen sichtbar (Kennzeichen, Standort,
+   Einsatzstatus, geplante Dutys). Den **Fahrzeugstatus** (einsatzbereit /
+   nicht einsatzbereit / Sonderfahrzeug / Ersatzwagen / Fahrschule / Reserve)
+   darf nur der Supervisor ändern.
+7. **Warnungen:** Unter **Supervisor → Warnungen** Warnungen mit Stundenzahl
+   + Frist erfassen; **ab 3 Stunden muss abgearbeitet werden** – Fortschritt
+   durch „+0,5"/„+1" pflegen, abschließen wenn erledigt.
 
 ---
 
@@ -212,7 +226,9 @@ Pages (Frontend)**.
 | `/api/health` zeigt `duties:0` | `SEED_FILE=seed/duties.json` als Env-Variable gesetzt? Sonst Render-Einstellungen prüfen, Speichern deployst neu. |
 | Login meldet „Nicht angemeldet" | `JWT_SECRET` wurde geändert → einfach erneut einloggen. |
 | Pages lädt, aber keine Daten | `public/config.js` mit falscher/leerer `VBG_API_BASE`? → korrigieren + pushen. |
-| Daten futsch nach Reset/Redeploy | Normal. Dutys + geschützter Supervisor werden automatisch neu angelegt; nur eigene Nutzer/Zuteilungen/Vermerke neu machen. |
+| Fahrer kann Duty nicht zugewiesen bekommen | Fahrer braucht die **Linien-Lizenz** dieser Duty (Verwaltung unter **Supervisor → Linien & Lizenzen**). |
+| Duty-Zuteilung blockiert obwohl Lizenz da | Lizenzen nachträglich geändert? Einmal die Duty neu öffnen; Prozedur speichert die Lizenzprüfung serverseitig beim Zuteilen. |
+| Daten futsch nach Reset/Redeploy | Normal. Tagesplan + geschützter Supervisor werden automatisch neu angelegt; nur eigene Nutzer/Zuteilungen/Vermerke neu machen. |
 | CORS-Fehler im Browser | Render-URL in `config.js` ohne Schluss-Slash prüfen. (cors ist offen – Pages + Render funktionieren aus verschiedenen Domains.) |
 | Freie Render-Pläne sind langsam | Normal. UptimeRobot hält sie warm. |
 | `jggaming2518` nicht da | Passiert nur, wenn `data.json` manuell angefasst wurde – einmal neu starten, der Nutzer wird automatisch angelegt. |

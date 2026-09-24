@@ -15,14 +15,24 @@ const PROTECTED_SUPERVISOR = {
   role: "supervisor",
 };
 
+// Standard-Linien (Lizenzen der VBG). Stabile IDs, damit der Seed sie referenzieren kann.
+const DEFAULT_LINIEN = [
+  { id: "lin19", name: "19", label: "Linie 19" },
+  { id: "lin24", name: "(SB) 24", label: "Linie 24 (Schnellbus)" },
+  { id: "lin8", name: "8", label: "Linie 8" },
+  { id: "linN1", name: "N1", label: "Linie N1 (Nacht)" },
+];
+
 function emptyStore() {
   return {
     users: [],
-    stellwerke: [],
+    linien: [],
     fahrzeuge: [],
     shifts: [],
     duties: [],
     wishes: [],
+    applications: [], // Shiftanmeldungen
+    warns: [],
     notifications: [],
   };
 }
@@ -30,15 +40,9 @@ function emptyStore() {
 let db = null;
 
 function ensureDefaultCatalogs() {
-  if (db.stellwerke.length === 0) {
-    ["AK", "STB", "NS", "BHBF"].forEach((n) =>
-      db.stellwerke.push({ id: crypto.randomUUID(), name: n })
-    );
-  }
-  if (db.fahrzeuge.length === 0) {
-    ["628", "429", "245 (Dosto)"].forEach((n) =>
-      db.fahrzeuge.push({ id: crypto.randomUUID(), name: n })
-    );
+  // Linien-Katalog (falls leer) mit den 4 VBG-Linien füllen.
+  if (db.linien.length === 0) {
+    DEFAULT_LINIEN.forEach((l) => db.linien.push({ ...l }));
   }
 }
 
@@ -52,8 +56,7 @@ function ensureProtectedSupervisor() {
       username: PROTECTED_SUPERVISOR.username,
       passwordHash: bcrypt.hashSync(PROTECTED_SUPERVISOR.password, 10),
       role: PROTECTED_SUPERVISOR.role,
-      fdl: [],
-      tf: [],
+      linien: DEFAULT_LINIEN.map((l) => l.id),
       suspended: false,
       protected: true,
       createdAt: new Date().toISOString(),
@@ -64,6 +67,7 @@ function ensureProtectedSupervisor() {
     u.protected = true;
     if (u.role !== "supervisor") u.role = "supervisor";
     if (u.suspended) u.suspended = false;
+    if (!Array.isArray(u.linien)) u.linien = DEFAULT_LINIEN.map((l) => l.id);
   }
 }
 
@@ -90,10 +94,6 @@ function protectedUsername() {
   return PROTECTED_SUPERVISOR.username;
 }
 
-function ensureSupervisor() {
-  // Falls noch kein Supervisor existiert, wird der erste angelegte User automatisch Supervisor.
-}
-
 function load() {
   if (db) return db;
   try {
@@ -106,13 +106,24 @@ function load() {
     console.error("Daten konnten nicht geladen werden:", e.message);
     db = emptyStore();
   }
+  // Feldsicherung (auch für Daten aus älteren Versionen)
   if (!db.users) db.users = [];
-  if (!db.stellwerke) db.stellwerke = [];
+  if (!db.linien) db.linien = [];
   if (!db.fahrzeuge) db.fahrzeuge = [];
   if (!db.shifts) db.shifts = [];
   if (!db.duties) db.duties = [];
   if (!db.wishes) db.wishes = [];
+  if (!db.applications) db.applications = [];
+  if (!db.warns) db.warns = [];
   if (!db.notifications) db.notifications = [];
+  // Migration älterer Felder: fdl/tf (Fahrzeug/Stellwerk-Lizenzen) werden
+  // durch Linien-Lizenzen ersetzt; fallengelassene Stellwerke entfernen wir nicht hart.
+  db.users.forEach((u) => {
+    if (!Array.isArray(u.linien)) u.linien = [];
+    delete u.fdl;
+    delete u.tf;
+    if (u.role === "Supervisor") u.role = "supervisor";
+  });
   ensureDefaultCatalogs();
   ensureProtectedSupervisor();
   return db;
@@ -126,43 +137,71 @@ function save() {
   fs.renameSync(tmp, DATA_FILE);
 }
 
-// Importiert geseedete Shifts/Dutys aus einer committeten JSON-Datei (z.B.
-// seed/duties.json), wenn noch nichts vorhanden ist. Fahrzeuge werden per NAME
-// auf die Katalog-IDs des laufenden Systems gemappt.
+// Importiert den wiederverwendbaren Tagesplan aus seed/duties.json.
+// - Linien: idempotent anhand Name.
+// - Fahrzeuge: idempotent anhand Wagennummer.
+// - Shifts/Dutys: immer eingespielt, wenn die Shift-ID noch nicht existiert
+//   (damit der Tagesplan auch auf Bestandsinstallationen nachgerüstet wird).
+// Fahrzeug-Referenzen (vehicleId) werden über Wagennummer auf die laufenden IDs gemappt.
 function importDutiesFromFile(filePath) {
   if (!filePath) return 0;
   const abs = path.resolve(filePath);
   if (!fs.existsSync(abs)) return 0;
   const seed = JSON.parse(fs.readFileSync(abs, "utf8"));
-  if (!seed.duties || !seed.duties.length) return 0;
-  if (db.duties.length > 0) return 0; // nichts mehr importieren, wenn Daten da sind
+  let imported = 0;
 
-  const fzNameToId = {};
-  (db.fahrzeuge || []).forEach((f) => (fzNameToId[f.name] = f.id));
-  const mapVehicle = (name) => {
-    if (!name) return null;
-    if (fzNameToId[name]) return fzNameToId[name];
-    const nf = { id: uid(), name };
-    db.fahrzeuge.push(nf);
-    fzNameToId[name] = nf.id;
-    return nf.id;
-  };
-
-  for (const s of seed.shifts || []) {
-    if (!db.shifts.find((x) => x.id === s.id)) db.shifts.push({ ...s });
-    for (const d of seed.duties.filter((x) => x.shiftId === s.id)) {
-      db.duties.push({
-        ...d,
-        vehicleId: mapVehicle(d.vehicleId),
-        trips: (d.trips || []).map((t) => ({
-          ...t,
-          vehicleId: mapVehicle(t.vehicleId),
-        })),
-      });
+  // Linien
+  for (const l of seed.linien || []) {
+    if (!db.linien.find((x) => x.name === l.name || x.id === l.id)) {
+      db.linien.push({ id: l.id, name: l.name, label: l.label || l.name });
     }
   }
-  save();
-  return seed.duties.length;
+
+  // Fahrzeuge (Wagennummer = eindeutiger Schlüssel)
+  const wzToId = {};
+  (db.fahrzeuge || []).forEach((f) => (wzToId[f.wagennummer] = f.id));
+  for (const f of seed.fahrzeuge || []) {
+    if (!f.wagennummer) continue;
+    if (wzToId[f.wagennummer]) continue;
+    const nf = {
+      id: f.id || uid(),
+      wagennummer: f.wagennummer,
+      kennzeichen: f.kennzeichen || "",
+      typ: f.typ || "",
+      art: f.art || "",
+      status: f.status || "einsatzbereit",
+      ort: f.ort || "",
+      bemerkung: f.bemerkung || "",
+    };
+    db.fahrzeuge.push(nf);
+    wzToId[nf.wagennummer] = nf.id;
+  }
+
+  // Shifts + zugehörige Dutys
+  for (const s of seed.shifts || []) {
+    if (db.shifts.find((x) => x.id === s.id)) continue;
+    db.shifts.push({ ...s });
+    const shiftDuties = (seed.duties || []).filter((d) => d.shiftId === s.id);
+    for (const d of shiftDuties) {
+      db.duties.push({
+        ...d,
+        vehicleId: mapVehicle(d.vehicleId, wzToId),
+        linieId: d.linieId || null,
+        trips: (d.trips || []).map((t) => ({
+          ...t,
+          vehicleId: mapVehicle(t.vehicleId, wzToId),
+          stops: t.stops || [],
+        })),
+      });
+      imported++;
+    }
+  }
+  if (imported) save();
+  return imported;
+}
+
+function mapVehicle(idOrNull, wzToId) {
+  return idOrNull || null;
 }
 
 function uid() {
@@ -177,4 +216,5 @@ module.exports = {
   importDutiesFromFile,
   isProtected,
   protectedUsername,
+  DEFAULT_LINIEN,
 };
