@@ -10,9 +10,8 @@ Pages-Workflow (`.github/workflows/pages.yml`), Health-Endpoints
 **fest verankerte Supervisor** `jggaming2518`. Du musst nur noch die Konten
 anlegen und ein paar URLs setzen.
 
-> Hinweis: Der Projektordner heißt lokal noch „DVN Orga Web" – der Name der
-> Website ist aber **VBG Website**. Du kannst den Ordner in Windows jederzeit
-> umbenennen, der Code ist davon unabhängig.
+> Hinweis: Der Projektordner heißt auch lokal **VBG Website** – den Namen
+> kannst du in Windows jederzeit ändern, der Code ist davon unabhängig.
 
 ---
 
