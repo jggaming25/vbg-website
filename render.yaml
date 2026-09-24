@@ -1,0 +1,23 @@
+# Render Blueprint – erstellt den Web-Service automatisch.
+# Nutzung: Repo mit dieser Datei auf GitHub pushen und auf
+# render.com → "New" → "Blueprint" das Repo auswählen.
+#
+# Der Healthcheck-Pfad (gesund = HTTP 200) hält ausserdem den freien Plan wach
+# und entspricht dem Endpunkt, den UptimeRobot pingen soll.
+
+services:
+  - type: web
+    name: vbg-website
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: "20"
+      - key: SEED_FILE
+        value: seed/duties.json
