@@ -1,1613 +1,1836 @@
 "use strict";
 
-// ---------- Globale Helfer ----------
+// ============================================================
+// VBG Website – Frontend (Modell: Linien-Lizenzen, Strafstunden,
+// Anmeldungen von-bis, Shiftplan, Kundenservice, Activity,
+// Account, Gerätesperre, Supervisor-Nachrichten)
+// ============================================================
 
-function h(s) {
-  if (s === null || s === undefined) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function shortId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
-function toast(msg, kind) {
-  let wrap = document.querySelector(".toast-wrap");
-  if (!wrap) {
-    wrap = document.createElement("div");
-    wrap.className = "toast-wrap";
-    document.body.appendChild(wrap);
+// ---------- Gerätesperre (nur PC/Laptop/Tablet/Surface) ----------
+(function deviceLock() {
+  const UA = navigator.userAgent;
+  const konsole = /xbox|playstation|nintendo\s?(switch)?|gamecube/i.test(UA);
+  const handy = /iPhone|iPod|Android.*Mobile|Windows Phone|Opera Mini|BlackBerry|IEMobile|Openwave/i.test(UA);
+  if (konsole || handy) {
+    document.addEventListener("DOMContentLoaded", function () {
+      document.body.innerHTML = `
+        <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#10151c;color:#e8eef4;padding:30px;text-align:center">
+          <div style="max-width:480px">
+            <div style="font-size:52px">🚫</div>
+            <h2 style="margin:10px 0 8px">Dieses Gerät wird nicht unterstützt</h2>
+            <p style="color:#93a3b4;line-height:1.6">Die VBG-Website läuft nur auf Windows- und Linux-PCs,
+            Apple- und Windows-Surfaces sowie Laptops – nicht auf Handys oder Spielkonsolen.</p>
+          </div>
+        </div>`;
+    });
   }
-  const el = document.createElement("div");
-  el.className = "toast " + (kind || "");
-  el.textContent = msg;
-  wrap.appendChild(el);
-  setTimeout(() => el.remove(), 5000);
-}
+})();
 
-function fmtTime(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
+(function () {
+  "use strict";
 
-const BELL_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>`;
-
-// Fahrzeug-Status (Schlüssel → Anzeige + CSS-Klasse)
-const VEHICLE_STATUS = {
-  einsatzbereit: { label: "Einsatzbereit", cls: "green" },
-  nicht_einsatzbereit: { label: "Nicht einsatzbereit", cls: "red" },
-  sonderfahrzeug: { label: "Sonderfahrzeug", cls: "yellow" },
-  ersatzwagen: { label: "Ersatzwagen", cls: "sky" },
-  fahrschule: { label: "Fahrschule", cls: "violet" },
-  reserve: { label: "Reserve", cls: "gray" },
-};
-
-// ---------- State ----------
-
-const state = {
-  user: null,
-  view: "dashboard",
-  superTab: "users",
-  currentShiftId: null,
-  cats: { linien: [], fahrzeuge: [] },
-  users: [],
-  shifts: [],
-  notifications: [],
-  myApps: [],
-  notifOpen: false,
-  userboxOpen: false,
-  editingDutyId: null,
-  lastSeen: localStorage.getItem("vbg_notif_seen") || "0",
-};
-
-// ---------- Daten laden ----------
-
-async function loadCats() {
-  const [l, f] = await Promise.all([
-    api("GET", "/api/linien"),
-    api("GET", "/api/fahrzeuge"),
-  ]);
-  state.cats = { linien: l.items, fahrzeuge: f.items };
-}
-
-async function loadUsers() {
-  const r = await api("GET", "/api/users");
-  state.users = r.users;
-}
-
-async function loadShifts() {
-  const r = await api("GET", "/api/shifts");
-  state.shifts = r.shifts;
-}
-
-async function loadMyApps() {
-  const r = await api("GET", "/api/my/applications");
-  state.myApps = r.applications;
-}
-
-function linieName(id) {
-  const l = state.cats.linien.find((x) => x.id === id);
-  if (!l) return id ? id : "–";
-  return l.name || l.label || "–";
-}
-
-function linieCls(id) {
-  const n = linieName(id);
-  const map = { "19": "sky", "(SB) 24": "green", "24": "green", "8": "yellow", "N1": "violet" };
-  return map[n] || "gray";
-}
-
-function fzName(id) {
-  const f = state.cats.fahrzeuge.find((x) => x.id === id);
-  return f ? (f.wagennummer || f.kennzeichen || f.typ || "–") : id ? id : "–";
-}
-function fzFull(id) {
-  const f = state.cats.fahrzeuge.find((x) => x.id === id);
-  if (!f) return id ? id : "–";
-  let s = f.wagennummer || "";
-  if (f.typ) s += (s ? " · " : "") + f.typ;
-  return s;
-}
-
-function userName(id) {
-  const u = state.users.find((x) => x.id === id);
-  return u ? u.username : "–";
-}
-
-function effectiveVehicle(duty) {
-  if (duty.vehicleId) return duty.vehicleId;
-  const t = (duty.trips || []).find((x) => x.vehicleId);
-  return t ? t.vehicleId : null;
-}
-
-function hasLineLicense(user, linieId) {
-  if (!linieId) return true;
-  return (user.linien || []).includes(linieId);
-}
-
-function statusParts(v) {
-  const s = VEHICLE_STATUS[v.status] || { label: v.status || "—", cls: "gray" };
-  return s;
-}
-
-// ---------- Rendering ----------
-
-const app = document.getElementById("app");
-
-function render() {
-  if (!state.user) return renderLogin();
-  renderShell();
-}
-
-function renderLogin() {
-  app.innerHTML = `
-  <div class="login-wrap">
-    <div class="login-card">
-      <h1>VBG <span style="color:var(--accent)">Website</span></h1>
-      <p class="sub">Anmeldung – Busbetrieb</p>
-      <label>Benutzername</label>
-      <input id="lg-user" type="text" autocomplete="username" />
-      <label>Passwort</label>
-      <input id="lg-pass" type="password" autocomplete="current-password" />
-      <div class="row">
-        <input id="lg-remember" type="checkbox" /> <span>Angemeldet bleiben</span>
-      </div>
-      <button class="btn" id="lg-btn">Anmelden</button>
-      <div class="login-error" id="lg-err"></div>
-    </div>
-  </div>`;
-  const u = document.getElementById("lg-user");
-  const p = document.getElementById("lg-pass");
-  if (u) u.focus();
-  const doLogin = async () => {
-    const err = document.getElementById("lg-err");
-    try {
-      const r = await api("POST", "/api/auth/login", {
-        username: u.value,
-        password: p.value,
-        remember: document.getElementById("lg-remember").checked,
-      });
-      Auth.saveToken(r.token, document.getElementById("lg-remember").checked);
-      state.user = r.user;
-      afterLogin();
-    } catch (e) {
-      if (err) err.textContent = e.message;
-    }
+  // ---------- Mini-Übersetzung (Standard: Deutsch) ----------
+  const I18N = {
+    nav_uebersicht: ["Übersicht", "Overview"],
+    nav_shifts: ["Shifts", "Shifts"],
+    nav_shiftplan: ["Shiftplan", "Duty plan"],
+    nav_anmeldung: ["Anmeldung", "Sign up"],
+    nav_activity: ["Activity", "Activity"],
+    nav_supervisor: ["Supervisor", "Supervisor"],
+    nav_account: ["Account", "Account"],
   };
-  document.getElementById("lg-btn").onclick = doLogin;
-  p.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
-}
-
-async function afterLogin() {
-  try {
-    await loadCats();
-    if (state.user.role === "supervisor") await Promise.all([loadUsers(), loadShifts()]);
-    else await loadShifts();
-    await loadMyApps();
-    await pollNotifications(true);
-    render();
-    startPolling();
-    requestNotifPermissionIfPossible();
-  } catch (e) {
-    toast(e.message, "err");
+  function t(key) {
+    const pair = I18N[key];
+    if (!pair) return key;
+    const lang = (state.user && state.user.language) || "de";
+    return lang === "en" ? pair[1] : pair[0];
   }
-}
 
-function renderShell() {
-  const sup = state.user.role === "supervisor";
-  app.innerHTML = `
-  <div class="topbar">
-    <div class="brand">VBG <span class="sg">Website</span></div>
-    <nav>
-      <a data-nav="dashboard" class="active" href="#">Übersicht</a>
-      <a data-nav="shifts" href="#">Shifts / Dutys</a>
-      <a data-nav="vehicles" href="#">Fahrzeuge</a>
-      ${sup ? `<a data-nav="supervisor" href="#">Supervisor</a>` : ""}
-    </nav>
-    <div class="right">
-      <div class="notif-wrap">
-        <button class="notif-btn" id="notif-btn" title="Benachrichtigungen"></button>
-        <div class="notif-drop" id="notif-drop"></div>
-      </div>
-      <div class="userbox">
-        <button class="userbox-btn" id="ubox-btn">
-          <span class="avatar">${h(state.user.username.slice(0, 2).toUpperCase())}</span>
-          <span class="name">${h(state.user.username)}</span>
-        </button>
-        <div class="userbox-drop" id="ubox-drop">
-          <div class="who">
-            <b>${h(state.user.username)}</b>
-            <div class="role">${h(state.user.roleLabel || state.user.role)}</div>
-          </div>
-          <div class="lic">
-            <b>Linien-Lizenzen:</b> ${(state.user.linien || []).length ? state.user.linien.map(linieName).join(", ") : "keine"}
-          </div>
-          <button id="desktop-notif-btn">Desktop-Benachrichtigungen aktivieren</button>
-          <button class="danger" id="logout-btn">Abmelden</button>
+  // ---------- Helfer ----------
+  function h(s) {
+    if (s === null || s === undefined) return "";
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function toast(msg, kind) {
+    let wrap = document.querySelector(".toast-wrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "toast-wrap";
+      document.body.appendChild(wrap);
+    }
+    const el = document.createElement("div");
+    el.className = "toast " + (kind || "");
+    el.textContent = msg;
+    wrap.appendChild(el);
+    setTimeout(() => el.remove(), 5000);
+  }
+
+  function timeToMin(t) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || "").trim());
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
+  }
+  function durMin(von, bis) {
+    const a = timeToMin(von), b = timeToMin(bis);
+    return (b <= a ? b + 1440 : b) - a;
+  }
+  function pauseMin(arr, dep) {
+    const a = timeToMin(arr), b = timeToMin(dep);
+    return Math.max(0, (b <= a ? b + 1440 : b) - a);
+  }
+  function fmtMin(m) {
+    m = Math.max(0, Math.round(m));
+    const hh = Math.floor(m / 60), mm = m % 60;
+    return hh > 0 ? hh + " h " + (mm ? mm + " min" : "") : mm + " min";
+  }
+
+  // ---------- Konstanten ----------
+  const ROLE_LABELS = { supervisor: "Supervisor", senior: "Senior Busfahrer", user: "Busfahrer" };
+  const VEHICLE_STATUS = {
+    einsatzbereit: { label: "Einsatzbereit", cls: "green" },
+    nicht_einsatzbereit: { label: "Nicht einsatzbereit", cls: "red" },
+    sonderfahrzeug: { label: "Sonderfahrzeug", cls: "yellow" },
+    ersatzwagen: { label: "Ersatzwagen", cls: "sky" },
+    fahrschule: { label: "Fahrschule", cls: "violet" },
+    reserve: { label: "Reserve", cls: "gray" },
+  };
+
+  // ---------- State ----------
+  const state = {
+    user: null,
+    view: "dashboard",
+    superTab: "users",
+    cats: { linien: [], fahrzeuge: [] },
+    users: [],
+    shifts: [],
+    myApps: [],
+    notifications: [],
+    notifOpen: false,
+    // Shiftplan
+    planShiftId: null,
+    plan: null, // { shift, duties, supervisoren }
+    planExpandedStops: {},
+    expandedDuties: {},
+    // Anmeldung
+    anmeldungShiftId: "",
+    anmeldungArt: "bus",
+    // Activity
+    actMe: null,
+    actAll: null,
+    // Supervisor
+    appsAll: [],
+    wishesAll: [],
+    profile: null,
+    latestAnnounce: null,
+    // Filter
+    appFilter: { nutzer: "", shift: "" },
+    activityRange: "woche",
+    nichtDienlich: "vehicles", // unused Platzhalter
+  };
+
+  function isSup() { return state.user && state.user.role === "supervisor"; }
+  function isDriver() { return state.user && (state.user.role === "user" || state.user.role === "senior"); }
+  function isTemplateShift(s) {
+    return s && (s.id === "tpl-tagesplan" || /staff\s*shift/i.test(s.name || ""));
+  }
+  function realShifts() { return state.shifts.filter((s) => !isTemplateShift(s)); }
+
+  // ---------- Daten laden ----------
+  async function loadCats() {
+    try {
+      const [l, f] = await Promise.all([api("GET", "/api/linien"), api("GET", "/api/fahrzeuge")]);
+      state.cats = { linien: l.items || [], fahrzeuge: f.items || [] };
+    } catch (e) { /* ignoriert */ }
+  }
+  async function loadUsers() {
+    try { const r = await api("GET", "/api/users"); state.users = r.users || []; } catch (e) {}
+  }
+  async function loadShifts() {
+    try { const r = await api("GET", "/api/shifts"); state.shifts = r.shifts || []; } catch (e) {}
+  }
+  async function loadMyApps() {
+    try { const r = await api("GET", "/api/my/applications"); state.myApps = r.applications || []; } catch (e) {}
+  }
+  async function loadNotifs() {
+    try {
+      const r = await api("GET", "/api/notifications?onlyUnread=1");
+      state.notifications = r.notifications || [];
+      renderTopbarBadge();
+    } catch (e) {}
+  }
+  async function loadPlan() {
+    if (!state.planShiftId) { state.plan = null; return; }
+    try {
+      const r = await api("GET", "/api/shifts/" + state.planShiftId + "/duties");
+      state.plan = r;
+    } catch (e) { state.plan = null; }
+  }
+
+  function refreshAll() {
+    return Promise.all([loadCats(), loadShifts(), loadMyApps()]);
+  }
+
+  // ---------- Anzeige-Helfer ----------
+  function linieName(l) { return l ? l.name || l.beschreibung || "–" : "–"; }
+  function linieNameId(id) {
+    const l = state.cats.linien.find((x) => x.id === id);
+    return linieName(l);
+  }
+  function linieClsId(id) {
+    const name = linieNameId(id);
+    const map = { "19": "sky", "(SB) 24": "green", "24": "green", "8": "yellow", "N1": "violet" };
+    return map[name] || "gray";
+  }
+  function fzName(id) {
+    const f = state.cats.fahrzeuge.find((x) => x.id === id);
+    return f ? (f.wagennummer || f.kennzeichen || f.typ || "–") : id ? "Fzg " + id.slice(0, 6) : "–";
+  }
+  function userName(id) {
+    const u = state.users.find((x) => x.id === id);
+    return u ? u.username : id ? "?" : "–";
+  }
+  function roleBadge(role) {
+    const cls = role === "supervisor" ? "violet" : role === "senior" ? "sky" : "gray";
+    return `<span class="badge ${cls}">${h(ROLE_LABELS[role] || role)}</span>`;
+  }
+  function licBadges(ids) {
+    return (ids || []).map((id) => {
+      const l = state.cats.linien.find((x) => x.id === id);
+      return `<span class="badge ${linieClsId(id)}">${h(linieName(l))}</span>`;
+    }).join(" ") || '<span class="muted">–</span>';
+  }
+
+  // ---------- Haupt-Render ----------
+  function render() {
+    const app = document.getElementById("app");
+    if (!state.user) { app.innerHTML = renderLogin(); return; }
+    app.innerHTML = `
+      ${renderTopbar()}
+      <div id="announce-banner"></div>
+      <main>${renderView()}</main>`;
+    renderTopbarBadge();
+  }
+
+  function renderLogin() {
+    return `
+    <div class="login-wrap">
+      <div class="login-card">
+        <h1>VBG <span style="color:var(--accent)">Organisation</span></h1>
+        <p class="sub">Fahrplan-Org &amp; Einsatzplanung</p>
+        <div>
+          <label>Benutzername</label>
+          <input id="login-user" type="text" autocomplete="username" onkeydown="if(event.key==='Enter')VBG.doLogin()"/>
+          <label>Passwort</label>
+          <input id="login-pw" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')VBG.doLogin()"/>
+          <div class="row"><input id="login-remember" type="checkbox"/><label style="margin:0">Angemeldet bleiben</label></div>
+          <button class="btn" onclick="VBG.doLogin()">Anmelden</button>
+          <div id="login-error" class="login-error"></div>
         </div>
       </div>
-    </div>
-  </div>
-  <main id="main"></main>`;
-
-  document.querySelectorAll("nav a").forEach((a) => {
-    a.onclick = (e) => {
-      e.preventDefault();
-      setView(a.dataset.nav);
-    };
-  });
-
-  document.getElementById("notif-btn").onclick = (e) => {
-    e.stopPropagation();
-    state.notifOpen = !state.notifOpen;
-    document.getElementById("notif-drop").classList.toggle("open", state.notifOpen);
-  };
-  document.getElementById("ubox-btn").onclick = (e) => {
-    e.stopPropagation();
-    state.userboxOpen = !state.userboxOpen;
-    document.getElementById("ubox-drop").classList.toggle("open", state.userboxOpen);
-  };
-  document.addEventListener("click", () => {
-    document.getElementById("notif-drop").classList.remove("open");
-    document.getElementById("ubox-drop").classList.remove("open");
-    state.notifOpen = state.userboxOpen = false;
-  });
-  document.getElementById("logout-btn").onclick = doLogout;
-  const dnb = document.getElementById("desktop-notif-btn");
-  if (dnb) dnb.onclick = () => requestNotifPermission(true);
-
-  renderNotifBadge();
-  renderView();
-}
-
-function setView(v) {
-  state.view = v;
-  document.querySelectorAll("nav a").forEach((a) => {
-    a.classList.toggle("active", a.dataset.nav === v);
-  });
-  renderView();
-}
-
-async function renderView() {
-  const main = document.getElementById("main");
-  try {
-    if (state.view === "dashboard") await renderDashboard(main);
-    else if (state.view === "shifts") await renderShifts(main);
-    else if (state.view === "shiftDetail") await renderShiftDetail(main);
-    else if (state.view === "vehicles") await renderVehicles(main);
-    else if (state.view === "supervisor") await renderSupervisor(main);
-  } catch (e) {
-    main.innerHTML = `<div class="empty">${h(e.message)}</div>`;
-  }
-}
-
-// ---------- Dashboard ----------
-
-async function renderDashboard(main) {
-  main.innerHTML = `<div class="spinner">Lade…</div>`;
-  const sup = state.user.role === "supervisor";
-  const shifts = state.shifts;
-  let wishes = [];
-  let users = [];
-  let warns = [];
-  let apps = [];
-  if (sup) {
-    try {
-      const [wr, ur, wrns, ar] = await Promise.all([
-        api("GET", "/api/wishes"),
-        api("GET", "/api/users"),
-        api("GET", "/api/warns"),
-        api("GET", "/api/applications"),
-      ]);
-      wishes = wr.wishes.filter((w) => w.status === "pending");
-      users = ur.users;
-      warns = wrns.warns.filter((w) => !w.abgeschlossen);
-      apps = ar.applications.filter((a) => a.status === "pending");
-    } catch (e) { /* ignore */ }
+    </div>`;
   }
 
-  let myDuties = [];
-  if (!sup) {
-    const out = [];
-    for (const sh of shifts) {
-      const r = await api("GET", "/api/shifts/" + sh.id + "/duties");
-      out.push(...r.duties.filter((d) => d.assignedUserId === state.user.id));
-    }
-    myDuties = out;
-  }
-  const myPending = state.myApps.filter((a) => a.status === "pending");
+  function renderTopbar() {
+    const u = state.user || {};
+    const tabs = [
+      { id: "dashboard", label: t("nav_uebersicht") },
+      { id: "shifts", label: t("nav_shifts") },
+      { id: "shiftplan", label: t("nav_shiftplan") },
+      { id: "anmeldung", label: t("nav_anmeldung") },
+      { id: "activity", label: t("nav_activity") },
+    ];
+    if (isSup()) tabs.push({ id: "supervisor", label: t("nav_supervisor") });
+    const links = tabs
+      .map((tb) => `<a class="${state.view === tb.id ? "active" : ""}" onclick="VBG.setView('${tb.id}')">${h(tb.label)}</a>`)
+      .join("");
 
-  const activeUsers = sup ? users.filter((u) => !u.suspended).length : "-";
-  main.innerHTML = `
-    <div class="card-grid">
-      <div class="stat"><div class="num">${shifts.length}</div><div class="lbl">Shifts</div></div>
-      ${sup ? `<div class="stat"><div class="num">${activeUsers}</div><div class="lbl">aktive Nutzer</div></div>
-      <div class="stat"><div class="num">${wishes.length}</div><div class="lbl">offene Wünsche</div></div>
-      <div class="stat"><div class="num">${apps.length}</div><div class="lbl">offene Anmeldungen</div></div>
-      <div class="stat"><div class="num">${warns.length}</div><div class="lbl">offene Warnungen</div></div>` : `
-      <div class="stat"><div class="num">${myDuties.length}</div><div class="lbl">meine Dutys</div></div>
-      <div class="stat"><div class="num">${myPending.length}</div><div class="lbl">offene Anmeldungen</div></div>`}
-      <div class="stat"><div class="num">${state.cats.fahrzeuge.length}</div><div class="lbl">Fahrzeuge</div></div>
-    </div>
-    <div class="container" style="margin-top:16px">
-      <h2>Willkommen, ${h(state.user.username)}!</h2>
-      <p class="muted">Plane Shifts, teile Dutys zu und behalte die Fahrzeuge im Blick.</p>
-      <div class="flex" style="margin-top:8px">
-        <button class="btn" onclick="VBG.setView('shifts')">Zu den Shifts</button>
-        <button class="btn btn-ghost" onclick="VBG.setView('vehicles')">Fahrzeugübersicht</button>
-        ${sup ? `<button class="btn btn-ghost" onclick="VBG.setView('supervisor')">Supervisor-Bereich</button>` : ""}
+    return `
+    <header class="topbar">
+      <div class="brand">VBG <span class="sg">•</span> Orga</div>
+      <nav>${links}</nav>
+      <div class="right">
+        ${isSup() ? `
+          <div class="notif-wrap">
+            <button class="notif-btn" title="Nachricht senden" onclick="VBG.openAnnounce()">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14L4 6l4-2 3 4 4-4 3 2-2 8H6z"/><path d="M4 6l6 8"/></svg>
+            </button>
+          </div>` : ""}
+        <div class="notif-wrap">
+          <button class="notif-btn" onclick="VBG.toggleNotif(event)">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+            <span id="notif-badge" class="badge" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;min-width:18px;height:18px;border-radius:9px;padding:0 4px;font-size:11px;align-items:center;justify-content:center"></span>
+          </button>
+          <div id="notif-drop" class="notif-drop"></div>
+        </div>
+        <div class="userbox">
+          <button class="userbox-btn" onclick="VBG.setView('account')">
+            <span class="avatar">${h(avatarLetter(u))}</span>
+            <span class="name">${h(u.username || "")}</span>
+          </button>
+        </div>
       </div>
-    </div>
-    ${sup && wishes.length ? `
-    <div class="container">
-      <h2>Offene Zuteilungswünsche</h2>
-      <table>
-        <tr><th>Nutzer</th><th>Duty</th><th>Shift</th><th>Linie</th><th>Fahrzeug</th><th></th></tr>
-        ${wishes.map((w) => `
-        <tr>
-          <td>${h(w.username)}</td>
-          <td>${h(w.dutyName)}</td>
-          <td>${h(w.shiftName)}</td>
-          <td><span class="badge ${linieCls(w.linie)}">${h(w.linie || "–")}</span></td>
-          <td>${h(w.vehicleName || "–")}</td>
-          <td class="flex">
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptWish('${w.id}')">Annehmen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyWish('${w.id}')">Ablehnen</button>
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>` : ""}
-    ${sup && apps.length ? `
-    <div class="container">
-      <h2>Offene Shift-Anmeldungen</h2>
-      <table>
-        <tr><th>Nutzer</th><th>Shift</th><th>von–bis</th><th>Nachricht</th><th></th></tr>
-        ${apps.map((a) => `
-        <tr>
-          <td>${h(a.username)}</td>
-          <td>${h(a.shiftName)}</td>
-          <td>${h(a.shiftStart)}–${h(a.shiftEnd)}</td>
-          <td>${h(a.note || "–")}</td>
-          <td class="flex">
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptApp('${a.id}')">Annehmen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyApp('${a.id}')">Ablehnen</button>
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>` : ""}
-    ${!sup && (myDuties.length || myPending.length) ? `
-    <div class="container">
-      <h2>Meine Dutys &amp; Anmeldungen</h2>
-      ${myDuties.map((d) => `
-        <div class="duty-card ${d.cancelled ? "cancelled" : ""}">
-          <div class="duty-head">
-            <div>
-              <div class="duty-title">${h(d.name)} ${d.cancelled ? '<span class="badge red">entfällt</span>' : ""}
-                <span class="badge ${linieCls(d.linieId)}">${h(d.linieName || "–")}</span></div>
-              <div class="duty-meta">Fahrzeug: ${h(fzName(effectiveVehicle(d)))}
-                ${d.cancelNote ? " · Vermerk: " + h(d.cancelNote) : ""}</div>
-            </div>
-            <button class="btn btn-ghost btn-sm" onclick="VBG.openShift('${d.shiftId}')">Shift ansehen</button>
-          </div>
-        </div>`).join("")}
-      ${myPending.map((a) => `
+    </header>`;
+  }
+
+  function avatarLetter(u) {
+    if (u && u.avatar) return u.avatar.slice(0, 1).toUpperCase();
+    return ((u && u.username) || "?").slice(0, 1).toUpperCase();
+  }
+
+  function renderTopbarBadge() {
+    const el = document.getElementById("notif-badge");
+    if (!el) return;
+    const unread = (state.notifications || []).filter((n) => !n.read).length;
+    if (unread > 0) { el.style.display = "flex"; el.textContent = unread > 99 ? "99+" : unread; }
+    else el.style.display = "none";
+  }
+
+  // ---------- View-Dispatch ----------
+  function renderView() {
+    switch (state.view) {
+      case "dashboard": return renderDashboard();
+      case "shifts": return renderShifts();
+      case "shiftplan": return renderShiftplanView();
+      case "anmeldung": return renderAnmeldung();
+      case "activity": return renderActivity();
+      case "supervisor": return renderSupervisor();
+      case "account": return renderAccount();
+      default: return renderDashboard();
+    }
+  }
+
+  // ---------- Übersicht ----------
+  function renderDashboard() {
+    const aktive = state.users.filter((u) => !u.suspended).length;
+    const fzGesamt = state.cats.fahrzeuge.length;
+    const fzEinsatz = state.cats.fahrzeuge.filter((f) => f.status === "einsatzbereit").length;
+    const shiftsReal = realShifts();
+    const kuendigung = state.users.filter((u) => u.kündigung && !u.suspended);
+    const offeneApps = [];
+
+    return `
+      <h2>Übersicht</h2>
+      <div class="card-grid">
+        <div class="stat"><div class="num">${shiftsReal.length}</div><div class="lbl">Shifts</div></div>
+        <div class="stat"><div class="num">${aktive}</div><div class="lbl">Aktive Nutzer</div></div>
+        <div class="stat"><div class="num">${fzGesamt}</div><div class="lbl">Fahrzeuge</div>
+          <div class="lbl">${fzEinsatz} einsatzbereit</div></div>
+        ${isSup() ? `<div class="stat"><div class="num">${offeneApps.length ? "–" : "–"}</div><div class="lbl">Anmeldungen</div></div>` : ""}
+      </div>
+
+      ${isSup() && kuendigung.length ? `
+        <div class="container" style="border-color:var(--red)">
+          <h2>Kündigung droht</h2>
+          ${kuendigung.map((u) => `
+            <div class="flex">
+              <span>${h(u.username)}</span>
+              <span class="badge red">${u.strafstunden} Strafstunden</span>
+              <button class="btn btn-sm" onclick="VBG.setView('supervisor')">Nutzer-Tab öffnen</button>
+            </div>`).join("")}
+        </div>` : ""}
+
+      <div class="container">
+        <h2>Schnellzugriff</h2>
+        <div class="flex">
+          <button class="btn" onclick="VBG.setView('shiftplan')">Zum Shiftplan</button>
+          <button class="btn btn-ghost" onclick="VBG.setView('anmeldung')">Anmeldung</button>
+          <button class="btn btn-ghost" onclick="VBG.setView('activity')">Activity</button>
+          ${isSup() ? `<button class="btn btn-ghost" onclick="VBG.setView('supervisor')">Supervisor-Bereich</button>` : ""}
+          <button class="btn btn-ghost" onclick="VBG.setView('account')">Account</button>
+        </div>
+      </div>`;
+  }
+
+  // ---------- Shifts ----------
+  function renderShifts() {
+    const shiftsReal = realShifts();
+    const tpl = state.shifts.find((s) => s.id === "tpl-tagesplan");
+
+    return `
+      <div class="spread"><h2>Shifts</h2>
+        ${isSup() ? `<button class="btn" onclick="VBG.showShiftForm()">+ Neue Shift</button>` : ""}
+      </div>
+
+      ${isSup() && tpl ? `
+        <div class="container" style="border-color:var(--accent)">
+          <b>Tagesplan</b>
+          <div class="muted" style="margin:4px 0 10px">${h(tpl.notes || "Wiederverwendbarer Tagesplan")} – ${tpl.dutyCount || 0} Dutys</div>
+          <button class="btn btn-yellow" onclick="VBG.newShiftFromTpl()">Als neue Shift übernehmen (Dutys werden automatisch geladen)</button>
+        </div>` : ""}
+
+      ${shiftsReal.length === 0 ? `<div class="empty">Noch keine Shifts vorhanden.</div>` : ""}
+      ${shiftsReal.map((s) => `
         <div class="duty-card">
           <div class="duty-head">
             <div>
-              <div class="duty-title">Anmeldung: ${h(a.shiftName)} <span class="badge yellow">wartet</span></div>
-              <div class="duty-meta">${h(a.shiftStart)}–${h(a.shiftEnd)} ${a.note ? "· " + h(a.note) : ""}</div>
+              <div class="duty-title">${h(s.name)}</div>
+              <div class="duty-meta">
+                ${s.date ? h(s.date) + " · " : ""}${s.startTime ? h(s.startTime) + "–" + h(s.endTime) : "Zeiten offen"}
+                · ${s.dutyCount || 0} Dutys
+                ${s.hostName ? ` · Host: <b>${h(s.hostName)}</b>` : ""}
+                ${(s.coSupervisorNames || []).length ? ` · Co-Supervisor: ${s.coSupervisorNames.map((n) => h(n)).join(", ")}` : ""}
+              </div>
+            </div>
+            <div class="flex">
+              <button class="btn btn-sm" onclick="VBG.openPlan('${s.id}')">Shiftplan öffnen</button>
+              ${isSup() ? `
+                <button class="btn btn-ghost btn-sm" onclick="VBG.editShift('${s.id}')">Bearbeiten</button>
+                <button class="btn btn-danger btn-sm" onclick="VBG.deleteShift('${s.id}')">Löschen</button>` : ""}
             </div>
           </div>
         </div>`).join("")}
-    </div>` : ""}
-  `;
-}
 
-// ---------- Shifts (Übersicht) ----------
-
-async function renderShifts(main) {
-  await loadShifts();
-  const sup = state.user.role === "supervisor";
-  main.innerHTML = `
-    <div class="spread" style="margin-bottom:16px">
-      <h1 style="margin:0;font-size:20px">Shifts &amp; Dutys</h1>
-      ${sup ? `<button class="btn" onclick="VBG.showShiftForm()">+ Neue Shift</button>` : ""}
-    </div>
-    <div id="shift-form"></div>
-    <div id="shift-list"></div>`;
-  if (!state.shifts.length) {
-    document.getElementById("shift-list").innerHTML =
-      `<div class="empty">Noch keine Shifts. ${sup ? "Lege die erste an oder kopiere den Tagesplan." : "Bitte warte auf den Supervisor."}</div>`;
-    return;
-  }
-  document.getElementById("shift-list").innerHTML = state.shifts.map((s) => `
-    <div class="container">
-      <div class="spread">
-        <div>
-          <b style="font-size:16px">${h(s.name)}</b>
-          <span class="muted"> · ${s.date ? h(s.date) : "kein Datum"}</span>
-          ${s.startTime || s.endTime ? `<span class="muted"> · ${h(s.startTime)}–${h(s.endTime)}</span>` : ""}
-          <span class="badge sky" style="margin-left:10px">${s.dutyCount} Dutys</span>
-          ${s.id === "tpl-tagesplan" ? '<span class="badge violet" style="margin-left:6px">Tagesplan (wiederverwendbar)</span>' : ""}
-        </div>
-        <div class="flex">
-          ${sup ? `
-            <button class="btn btn-ghost btn-sm" onclick="VBG.editShift('${s.id}')">Bearbeiten</button>
-            ${s.id !== "tpl-tagesplan" ? `<button class="btn btn-yellow btn-sm" onclick="VBG.showCopyForm('${s.id}')">Aus Tagesplan kopieren</button>` : `<button class="btn btn-yellow btn-sm" onclick="VBG.showCopyForm('${s.id}')">Als Shift übernehmen</button>`}
-            <button class="btn btn-danger btn-sm" onclick="VBG.deleteShift('${s.id}')">Löschen</button>` : ""}
-          <button class="btn btn-sm" onclick="VBG.openShift('${s.id}')">Öffnen</button>
-        </div>
-      </div>
-      ${s.notes ? `<p class="muted" style="margin:8px 0 0">${h(s.notes)}</p>` : ""}
-    </div>`).join("");
-}
-
-function showShiftForm() {
-  const el = document.getElementById("shift-form");
-  el.innerHTML = `
-    <div class="container">
-      <h2>Neue Shift anlegen</h2>
-      <div class="form-grid">
-        <input id="sf-name" placeholder="Name (z.B. Frühschicht So)" />
-        <input id="sf-date" type="date" />
-        <input id="sf-start" type="time" placeholder="von" />
-        <input id="sf-end" type="time" placeholder="bis" />
-      </div>
-      <textarea id="sf-notes" placeholder="Notizen (optional)" style="width:100%;margin-top:10px;min-height:60px"></textarea>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.createShift()">Speichern</button>
-        <button class="btn btn-ghost" onclick="VBG.cancelShiftForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-
-function showCopyForm(id) {
-  const s = state.shifts.find((x) => x.id === id);
-  const el = document.getElementById("shift-form");
-  const today = new Date();
-  const dd = String(today.getDate()).padStart(2, "0");
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const yyyy = today.getFullYear();
-  el.innerHTML = `
-    <div class="container">
-      <h2>${s.id === "tpl-tagesplan" ? "Tagesplan als Shift übernehmen" : "Shift kopieren"} – Quelle: ${h(s.name)}</h2>
-      <p class="muted">Alle Dutys werden ohne Zuteilung kopiert. Anschließend kannst du die Shift mit Fahrern und Fahrzeugen planen.</p>
-      <div class="form-grid">
-        <input id="cf-name" placeholder="Name (z.B. Samstag 12.10.)" value="${h(s.name)}" />
-        <input id="cf-date" type="date" value="${yyyy}-${mm}-${dd}" />
-      </div>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.copyShift('${s.id}')">Kopieren</button>
-        <button class="btn btn-ghost" onclick="VBG.cancelShiftForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-
-function cancelShiftForm() {
-  document.getElementById("shift-form").innerHTML = "";
-}
-
-function editShift(id) {
-  const s = state.shifts.find((x) => x.id === id);
-  document.getElementById("shift-form").innerHTML = `
-    <div class="container">
-      <h2>Shift bearbeiten</h2>
-      <div class="form-grid">
-        <input id="sf-name" value="${h(s.name)}" />
-        <input id="sf-date" type="date" value="${h(s.date)}" />
-        <input id="sf-start" type="time" value="${h(s.startTime)}" />
-        <input id="sf-end" type="time" value="${h(s.endTime)}" />
-      </div>
-      <textarea id="sf-notes" style="width:100%;margin-top:10px;min-height:60px">${h(s.notes)}</textarea>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.updateShift('${s.id}')">Speichern</button>
-        <button class="btn btn-ghost" onclick="VBG.cancelShiftForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-
-// ---------- Shift-Detail (Duty-Planung) ----------
-
-async function renderShiftDetail(main) {
-  const shiftId = state.currentShiftId;
-  main.innerHTML = `<div class="spinner">Lade Dutys…</div>`;
-  const r = await api("GET", "/api/shifts/" + shiftId + "/duties");
-  const shift = r.shift;
-  const duties = r.duties;
-  const sup = state.user.role === "supervisor";
-  if (!r.duties) return main.innerHTML = `<div class="empty">Keine Dutys.</div>`;
-  state.editTrip = state.editTrip || {};
-  state.editStop = state.editStop || {};
-  duties.forEach((d) => {
-    d.editingTrip = state.editTrip[d.id] || null;
-    d.trips.forEach((t) => {
-      t.editingStop = state.editStop[t.id] || null;
-    });
-  });
-
-  let wishes = [];
-  let apps = [];
-  if (sup) {
-    const [wr, ar] = await Promise.all([api("GET", "/api/wishes"), api("GET", "/api/applications")]);
-    wishes = wr.wishes.filter((w) => w.shiftId === shiftId && w.status === "pending");
-    apps = ar.applications.filter((a) => a.shiftId === shiftId && a.status === "pending");
-    await loadUsers();
-  } else {
-    await loadMyApps();
+      <div id="shift-form"></div>`;
   }
 
-  const myApp = state.myApps.find((a) => a.shiftId === shiftId);
-
-  main.innerHTML = `
-    <div class="spread" style="margin-bottom:16px">
-      <div>
-        <button class="btn btn-ghost btn-sm" onclick="VBG.setView('shifts')">&larr; Shifts</button>
-        <h1 style="margin:6px 0 0;font-size:20px">${h(shift.name)} <span class="muted">${h(shift.date)}</span></h1>
-        ${(shift.startTime || shift.endTime) ? `<span class="duty-meta">von–bis: <b>${h(shift.startTime)}–${h(shift.endTime)}</b></span>` : ""}
-        ${shift.notes ? `<p class="muted" style="margin:4px 0 0">${h(shift.notes)}</p>` : ""}
-      </div>
-      ${sup ? `<button class="btn" onclick="VBG.showDutyForm('${shiftId}')">+ Duty anlegen</button>` : ""}
-    </div>
-    <div id="duty-form"></div>
-    ${!sup ? `
-    <div class="container" id="apply-box">
-      <h2>Shift-Anmeldung</h2>
-      ${myApp ? `
-        <p>Status: <span class="badge ${myApp.status === "accepted" ? "green" : myApp.status === "denied" ? "red" : "yellow"}">${h(myApp.status)}</span></p>
-        ${myApp.note ? `<p class="muted">Deine Nachricht: ${h(myApp.note)}</p>` : ""}` : `
-        <div class="flex" style="margin-top:6px">
-          <input id="app-note" placeholder="Nachricht an den Supervisor (z.B. Mo + Di, nur Vormittag)" style="flex:1" />
-          <button class="btn btn-green" onclick="VBG.applyShift('${shiftId}')">Für diese Shift anmelden</button>
-        </div>`}
-    </div>` : ""}
-    ${sup && apps.length ? `
-    <div class="container">
-      <h2>Anmeldungen für diese Shift</h2>
-      <table>
-        <tr><th>Nutzer</th><th>Nachricht</th><th></th></tr>
-        ${apps.map((a) => `
-        <tr>
-          <td><b>${h(a.username)}</b></td>
-          <td>${h(a.note || "–")}</td>
-          <td>
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptApp('${a.id}')">Annehmen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyApp('${a.id}')">Ablehnen</button>
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>` : ""}
-    ${wishes.length ? `
-    <div class="container">
-      <h2>Zuteilungswünsche dieser Shift</h2>
-      ${wishes.map((w) => `
-        <div class="flex" style="justify-content:space-between;border-top:1px solid var(--border);padding:8px 0">
-          <span><b>${h(w.username)}</b> → ${h(w.dutyName)} <span class="badge ${linieCls(w.linie)}">${h(w.linie || "–")}</span> <span class="muted">(${h(w.vehicleName || "ohne Fzg")})</span></span>
-          <span class="flex">
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptWish('${w.id}')">Zuteilen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyWish('${w.id}')">Ablehnen</button>
-          </span>
-        </div>`).join("")}
-    </div>` : ""}
-    ${!duties.length ? `<div class="empty">Noch keine Dutys in dieser Shift.</div>` :
-      duties.map((d) => dutyCard(d, shiftId, sup)).join("")}
-  `;
-  bindDutyInputs();
-}
-
-function dutyCard(d, shiftId, sup) {
-  const vehicleId = effectiveVehicle(d);
-  const fzOpts = state.cats.fahrzeuge.map((f) =>
-    `<option value="${f.id}" ${f.id === d.vehicleId ? "selected" : ""}>${h(fzFull(f.id))}</option>`).join("");
-  const driverOpts = `<option value="">— nicht zugeteilt —</option>` +
-    state.users
-      .filter((u) => !u.suspended && u.role !== "supervisor" && hasLineLicense(u, d.linieId))
-      .map((u) =>
-        `<option value="${u.id}" ${u.id === d.assignedUserId ? "selected" : ""} >${h(u.username)} (${h(u.roleLabel || u.role)}) [${h((u.linien || []).length)} Linien]</option>`).join("");
-
-  const canWish = !sup && !d.assignedUserId && hasLineLicense(state.user, d.linieId);
-
-  return `
-  <div class="duty-card ${d.cancelled ? "cancelled" : ""}" id="duty-${d.id}">
-    <div class="duty-head">
-      <div>
-        <div class="duty-title">
-          <span class="badge ${linieCls(d.linieId)}">${h(d.linieName || "–")}</span>
-          ${h(d.name)}
-          ${d.cancelled ? '<span class="badge red">entfällt</span>' : ""}
-          ${d.assignedUserId ? `<span class="badge green">${h(userName(d.assignedUserId))}</span>` : '<span class="badge gray">frei</span>'}
+  function shiftFormHtml(s) {
+    const supers = state.users.filter((u) => u.role === "supervisor");
+    const sId = s ? s.id : "";
+    return `
+      <div class="container">
+        <h2>${s ? "Shift bearbeiten" : "Neue Shift"}</h2>
+        <div class="form-grid">
+          <label>Name
+            <input id="sf-name" value="${h(s ? s.name : "")}" placeholder="z. B. Tagesbetrieb 26.09."/></label>
+          <label>Datum
+            <input id="sf-date" type="date" value="${h(s ? s.date || "" : "")}"/></label>
+          <label>Startzeit
+            <input id="sf-start" type="time" value="${h(s ? s.startTime || "" : "")}"/></label>
+          <label>Endzeit
+            <input id="sf-end" type="time" value="${h(s ? s.endTime || "" : "")}"/></label>
+          <label>Notizen
+            <input id="sf-notes" value="${h(s ? s.notes || "" : "")}"/></label>
         </div>
-        <div class="duty-meta">
-          ${d.startTime ? `Dienst <b>${h(d.startTime)}–${h(d.endTime)}</b> · ` : ""}
-          Fahrzeug: <b>${h(fzName(vehicleId))}</b>
-          · ${d.trips.length} Fahrt(en) · ${d.trips.reduce((n, t) => n + t.stops.length, 0)} Halte
-          ${d.linienwechsel ? `<div class="duty-meta" style="margin-top:4px">↔ ${h(d.linienwechsel)}</div>` : ""}
-        </div>
-      </div>
-      <div class="flex">
-        ${canWish ? `<button class="btn btn-yellow btn-sm" onclick="VBG.wishDuty('${d.id}')">Duty wünschen</button>` : ""}
-        ${sup && d.assignedUserId ? `<button class="btn btn-ghost btn-sm" onclick="VBG.unassignDuty('${d.id}')">Zuteilung lösen</button>` : ""}
-        ${sup ? `<button class="btn btn-ghost btn-sm" onclick="VBG.deleteDuty('${d.id}')">Duty löschen</button>` : ""}
-      </div>
-    </div>
 
-    ${sup ? `
-    <div class="form-grid" style="margin-top:10px">
-      <select data-duty="${d.id}" data-kind="vehicle" title="Fahrzeug der Duty">
-        <option value="">— ohne Fahrzeug —</option>${fzOpts}
-      </select>
-      <select data-duty="${d.id}" data-kind="driver" title="Fahrer mit passender Linien-Lizenz">${driverOpts}</select>
-      <button class="btn btn-ghost btn-sm" data-duty="${d.id}" data-kind="vehall" title="Fahrzeug auch auf alle Fahrten übernehmen">Fzg für alle Fahrten</button>
-    </div>` : ""}
+        <fieldset><legend>Host (Haupt-Supervisor)</legend>
+          <select id="sf-host">${supers.map((u) => `<option value="${u.id}" ${(s && s.hostId === u.id) || (!s && u.id === state.user.id) ? "selected" : ""}>${h(u.username)}</option>`).join("")}</select>
+        </fieldset>
 
-    <fieldset>
-      <legend>Vermerke</legend>
-      <textarea data-duty="${d.id}" data-kind="notes" ${sup ? "" : "disabled"} style="width:100%;min-height:52px">${h(d.notes)}</textarea>
-      ${sup ? `
-      <div class="flex" style="margin-top:6px">
-        <label class="checkline"><input type="checkbox" data-duty="${d.id}" data-kind="cancel" ${d.cancelled ? "checked" : ""} /> Duty entfällt</label>
-        <input data-duty="${d.id}" data-kind="cancel-note" placeholder="Vermerk (z.B. Bauarbeiten)" value="${h(d.cancelNote)}" style="flex:1" />
-      </div>` : ""}
-    </fieldset>
-
-    ${d.trips.map((t) => tripCard(d, t, sup)).join("")}
-
-    ${sup ? `
-    <div class="form-grid" style="margin-top:12px" id="addtrip-${d.id}">
-      <input id="t-${d.id}-from" placeholder="Von" />
-      <input id="t-${d.id}-to" placeholder="Nach" />
-      <input id="t-${d.id}-dep" placeholder="Abfahrt (z.B. 06:12)" />
-      <input id="t-${d.id}-arr" placeholder="Ankunft" />
-      <button class="btn btn-sm" onclick="VBG.addTrip('${d.id}')">+ Fahrt</button>
-    </div>` : ""}
-  </div>`;
-}
-
-function tripCard(d, t, sup) {
-  const fzOpts = `<option value="">(Duty-Fzg)</option>` +
-    state.cats.fahrzeuge.map((f) =>
-      `<option value="${f.id}" ${f.id === t.vehicleId ? "selected" : ""}>${h(fzFull(f.id))}</option>`).join("");
-  return `
-  <div class="trip ${t.cancelled ? "cancelled" : ""}" id="trip-${t.id}">
-    <div class="trip-line">
-      <b>${h(t.from)}</b> <span class="trip-arrow">→</span> <b>${h(t.to)}</b>
-      <span class="muted">${t.dep ? t.dep : "–"} ${t.arr ? "→ " + t.arr : ""}</span>
-      ${t.vehicleId ? `<span class="badge sky">${h(fzName(t.vehicleId))}</span>` : ""}
-      ${t.cancelled ? `<span class="badge red">Fahrt entfällt</span>` : ""}
-      ${sup ? `
-      <span class="flex" style="margin-left:auto">
-        <button class="btn btn-xs" onclick="VBG.toggleTripEdit('${d.id}','${t.id}')">Bearbeiten</button>
-        <button class="btn btn-xs btn-danger" onclick="VBG.deleteTrip('${d.id}','${t.id}')">×</button>
-      </span>` : ""}
-    </div>
-    ${t.cancelNote ? `<div class="muted" style="margin-top:4px;color:var(--red)">Entfall: ${h(t.cancelNote)}</div>` : ""}
-
-    ${sup && d.editingTrip === t.id ? `
-    <div class="form-grid" style="margin-top:8px">
-      <input id="te-${t.id}-from" value="${h(t.from)}" placeholder="Von" />
-      <input id="te-${t.id}-to" value="${h(t.to)}" placeholder="Nach" />
-      <input id="te-${t.id}-dep" value="${h(t.dep)}" placeholder="Abfahrt" />
-      <input id="te-${t.id}-arr" value="${h(t.arr)}" placeholder="Ankunft" />
-    </div>
-    <div class="flex" style="margin-top:8px">
-      <select id="te-${t.id}-vehicle">${fzOpts}</select>
-      <label class="checkline"><input type="checkbox" id="te-${t.id}-cancel" ${t.cancelled ? "checked" : ""} /> entfällt</label>
-      <input id="te-${t.id}-note" placeholder="Vermerk Fahrt" value="${h(t.cancelNote)}" style="flex:1" />
-      <button class="btn btn-green btn-sm" onclick="VBG.saveTrip('${d.id}','${t.id}')">Speichern</button>
-    </div>` : ""}
-
-    <ul class="stop-list">
-      ${t.stops.map((s) => `
-      <li class="${s.cancelled ? "cancelled" : ""}">
-        <b>${h(s.station)}</b>
-        <span class="muted">${s.arr} ${s.dep ? "→ " + s.dep : ""}</span>
-        ${s.cancelled ? '<span class="badge red">Halt entfällt</span>' : ""}
-        ${sup ? `
-        <span class="flex">
-          ${t.editingStop === s.id ? `
-            <input id="se-${s.id}-st" value="${h(s.station)}" style="width:120px" />
-            <input id="se-${s.id}-arr" value="${h(s.arr)}" placeholder="An" style="width:60px" />
-            <input id="se-${s.id}-dep" value="${h(s.dep)}" placeholder="Ab" style="width:60px" />
-            <label class="checkline"><input type="checkbox" id="se-${s.id}-cancel" ${s.cancelled ? "checked" : ""} /> entfällt</label>
-            <button class="btn btn-xs btn-green" onclick="VBG.saveStop('${d.id}','${t.id}','${s.id}')">Ok</button>
-          ` : `
-            <button class="btn btn-xs" onclick="VBG.toggleStopEdit('${d.id}','${t.id}','${s.id}')">Edit</button>
-          `}
-          <button class="btn btn-xs btn-danger" onclick="VBG.deleteStop('${d.id}','${t.id}','${s.id}')">×</button>
-        </span>` : ""}
-      </li>`).join("")}
-      ${sup ? `
-      <li>
-        <span class="flex">
-          <input id="ns-${t.id}-st" placeholder="Station" style="width:130px" />
-          <input id="ns-${t.id}-arr" placeholder="An" style="width:60px" />
-          <input id="ns-${t.id}-dep" placeholder="Ab" style="width:60px" />
-          <button class="btn btn-xs" onclick="VBG.addStop('${d.id}','${t.id}')">+ Halt</button>
-        </span>
-      </li>` : ""}
-    </ul>
-  </div>`;
-}
-
-function bindDutyInputs() {
-  document.querySelectorAll("[data-kind='vehicle']").forEach((sel) => {
-    sel.onchange = async () => {
-      try { await api("PATCH", "/api/duties/" + sel.dataset.duty, { vehicleId: sel.value || null }); toast("Fahrzeug geändert", "ok"); } catch (e) { toast(e.message, "err"); }
-      await renderView();
-    };
-  });
-  document.querySelectorAll("[data-kind='driver']").forEach((sel) => {
-    sel.onchange = async () => {
-      try { await api("PATCH", "/api/duties/" + sel.dataset.duty, { assignedUserId: sel.value || null }); toast("Zuteilung gespeichert", "ok"); } catch (e) { toast(e.message, "err"); }
-      await renderView();
-    };
-  });
-  document.querySelectorAll("[data-kind='vehall']").forEach((btn) => {
-    btn.onclick = async () => {
-      const sel = document.querySelector(`[data-duty="${btn.dataset.duty}"][data-kind="vehicle"]`);
-      try { await api("POST", "/api/duties/" + btn.dataset.duty + "/vehicle", { vehicleId: sel.value || null, scope: "all" }); toast("Fahrzeug für alle Fahrten übernommen", "ok"); } catch (e) { toast(e.message, "err"); }
-      await renderView();
-    };
-  });
-  document.querySelectorAll("textarea[data-kind='notes']").forEach((ta) => {
-    ta.onchange = async () => {
-      try { await api("PATCH", "/api/duties/" + ta.dataset.duty, { notes: ta.value }); } catch (e) { toast(e.message, "err"); }
-    };
-  });
-  document.querySelectorAll("[data-kind='cancel']").forEach((cb) => {
-    cb.onchange = async () => {
-      try {
-        const note = document.querySelector(`[data-duty="${cb.dataset.duty}"][data-kind="cancel-note"]`).value;
-        await api("PATCH", "/api/duties/" + cb.dataset.duty, { cancelled: cb.checked, cancelNote: note });
-        toast(cb.checked ? "Duty wurde als entfallen markiert" : "Duty wieder aktiv", "ok");
-      } catch (e) { toast(e.message, "err"); }
-      await renderView();
-    };
-  });
-  document.querySelectorAll("[data-kind='cancel-note']").forEach((inp) => {
-    inp.onchange = async () => {
-      try { await api("PATCH", "/api/duties/" + inp.dataset.duty, { cancelNote: inp.value }); } catch (e) { toast(e.message, "err"); }
-    };
-  });
-}
-
-function showDutyForm(shiftId) {
-  const el = document.getElementById("duty-form");
-  const linOpts = state.cats.linien.map((l) => `<option value="${l.id}">${h(l.name)} ${l.label ? "(" + h(l.label) + ")" : ""}</option>`).join("");
-  const fzOpts = state.cats.fahrzeuge.map((f) => `<option value="${f.id}">${h(fzFull(f.id))}</option>`).join("");
-  el.innerHTML = `
-    <div class="container">
-      <h2>Neue Duty</h2>
-      <div class="form-grid">
-        <input id="df-name" placeholder="Name (z.B. 19 Kurs 1)" />
-        <select id="df-linie"><option value="">— ohne Linie —</option>${linOpts}</select>
-        <select id="df-vehicle"><option value="">— ohne Fahrzeug —</option>${fzOpts}</select>
-        <input id="df-start" placeholder="Dienstanfang (z.B. 05:00)" />
-        <input id="df-end" placeholder="Dienstende (z.B. 21:45)" />
-      </div>
-      <input id="df-wechsel" placeholder="Linienwechsel (z.B. Umlauf kann am GVZ auf L19 wechseln)" style="width:100%;margin-top:10px" />
-      <textarea id="df-notes" placeholder="Vermerke (optional)" style="width:100%;margin-top:10px;min-height:50px"></textarea>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.createDuty('${shiftId}')">Anlegen</button>
-        <button class="btn btn-ghost" onclick="VBG.hideDutyForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-function hideDutyForm() { document.getElementById("duty-form").innerHTML = ""; }
-
-// ---------- Fahrzeuge ----------
-
-async function renderVehicles(main) {
-  main.innerHTML = `<div class="spinner">Berechne Fahrzeugübersicht…</div>`;
-  const r = await api("GET", "/api/vehicles/overview");
-  const sup = state.user.role === "supervisor";
-  main.innerHTML = `
-    <div class="spread" style="margin-bottom:16px">
-      <div>
-        <h1 style="margin:0 0 4px;font-size:20px">Fahrzeugübersicht</h1>
-        <p class="muted" style="margin:0">Status aller Fahrzeuge anhand aller Dutys – shiftunabhängig. Status darf nur der Supervisor ändern.</p>
-      </div>
-      ${sup ? `<button class="btn" onclick="VBG.showVehicleForm()">+ Fahrzeug</button>` : ""}
-    </div>
-    <div id="veh-form"></div>
-    <div class="card-grid">
-      ${r.vehicles.map((v) => {
-        const st = statusParts(v);
-        return `
-      <div class="stat" style="border-left:4px solid var(--${st.cls === "violet" ? "accent" : st.cls})">
-        <div class="spread">
-          <span style="font-size:16px;font-weight:700">${h(v.wagennummer || v.kennzeichen || "–")}</span>
-          <span class="badge ${st.cls}">${h(st.label)}</span>
-        </div>
-        ${v.typ ? `<div class="muted" style="font-size:12px;margin-top:4px">${h(v.typ)} ${v.art ? "· " + h(v.art) : ""}</div>` : ""}
-        <div class="lbl" style="margin-top:6px">${h(v.kennzeichen || "kein Kennzeichen")} · ${h(v.ort || "Standort unbekannt")}</div>
-        ${v.einsatzStatus ? `<div class="lbl" style="margin-top:6px">Status: <b>${h(v.einsatzStatus)}</b></div>` : ""}
-        ${v.spawn ? `<div class="lbl" style="margin-top:4px">Spawnt bei ${h(v.spawn.from)} (${h(v.spawn.dutyName)}, ${h(v.spawn.dep)})</div>` : ""}
-        ${v.bemerkung ? `<div class="muted" style="font-size:12px;margin-top:6px">${h(v.bemerkung)}</div>` : ""}
-        ${v.uses.length ? `
-        <table style="margin-top:8px">
-          <tr><th>Duty</th><th>Shift</th><th>Zeit</th></tr>
-          ${v.uses.slice(0, 4).map((u) => `
-          <tr>
-            <td>${h(u.dutyName)}</td>
-            <td>${h(u.shiftName)}</td>
-            <td>${h(u.dep)} ${h(u.arr) ? "→ " + h(u.arr) : ""}</td>
-          </tr>`).join("")}
-        </table>` : ""}
-        ${sup ? `
-        <div class="form-grid" style="margin-top:10px">
-          <select id="vs-${v.id}">
-            ${Object.keys(VEHICLE_STATUS).map((k) => `<option value="${k}" ${k === v.status ? "selected" : ""}>${VEHICLE_STATUS[k].label}</option>`).join("")}
-          </select>
-          <input id="vo-${v.id}" placeholder="Standort" value="${h(v.ort)}" />
-        </div>
-        <div class="flex" style="margin-top:6px">
-          <button class="btn btn-green btn-sm" onclick="VBG.saveVehicleStatus('${v.id}')">Status speichern</button>
-          <button class="btn btn-danger btn-sm" onclick="VBG.delVehicle('${v.id}')">Löschen</button>
-        </div>` : ""}
-        <div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="VBG.openVehicleDuties('${v.id}')">Details</button></div>
-      </div>`;}).join("")}
-    </div>`;
-}
-
-function showVehicleForm() {
-  document.getElementById("veh-form").innerHTML = `
-    <div class="container">
-      <h2>Neues Fahrzeug</h2>
-      <div class="form-grid">
-        <input id="vf-wagen" placeholder="Wagennummer (z.B. 1406)" />
-        <input id="vf-kz" placeholder="Kennzeichen (z.B. GV-VB 1406)" />
-        <select id="vf-art"><option value="Solo">Solo</option><option value="Gelenk">Gelenk</option></select>
-        <select id="vf-status">${Object.keys(VEHICLE_STATUS).map((k) => `<option value="${k}">${VEHICLE_STATUS[k].label}</option>`).join("")}</select>
-        <input id="vf-ort" placeholder="Standort (z.B. Betriebshof Gravenberg)" />
-      </div>
-      <div class="flex" style="margin-top:10px">
-        <input id="vf-typ" placeholder="Typ (z.B. Mercedes-Benz O530 MÜ)" style="flex:1" />
-        <input id="vf-bem" placeholder="Bemerkung (optional)" style="flex:1" />
-      </div>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.createVehicle()">Anlegen</button>
-        <button class="btn btn-ghost" onclick="VBG.hideVehicleForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-function hideVehicleForm() { document.getElementById("veh-form").innerHTML = ""; }
-
-async function openVehicleDuties(vehicleId) {
-  const r = await api("GET", "/api/vehicles/overview");
-  const v = r.vehicles.find((x) => x.id === vehicleId);
-  if (!v) return;
-  const main = document.getElementById("main");
-  main.innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="VBG.setView('vehicles')">&larr; Übersicht</button>
-    <div class="container" style="margin-top:12px">
-      <h2>Wagen ${h(v.wagennummer || v.kennzeichen)} – alle Dutys</h2>
-      ${!v.uses.length ? `<div class="empty">Kein Einsatz geplant.</div>` : v.uses.map((u) => `
-        <div class="duty-card" style="display:flex;justify-content:space-between;align-items:center">
+        <fieldset><legend>Bis zu 2 weitere Supervisoren (Co-Supervisor)</legend>
           <div>
-            <b>${h(u.dutyName)}</b>
-            <div class="duty-meta">${h(u.shiftName)} ${u.shiftDate ? "· " + h(u.shiftDate) : ""}</div>
-            <div class="muted">${h(u.from)} → ${h(u.to)} · ${h(u.dep)} ${h(u.arr) ? "→ " + h(u.arr) : ""}</div>
+            ${supers.map((u) => {
+              const checked = s ? (s.coSupervisorIds || []).includes(u.id) : false;
+              return `<label class="checkline"><input type="checkbox" data-co="${u.id}" ${checked ? "checked" : ""}/> ${h(u.username)}</label>`;
+            }).join("")}
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="VBG.openShift('${u.shiftId}')">Shift öffnen</button>
-        </div>`).join("")}
-    </div>`;
-}
+        </fieldset>
 
-// ---------- Supervisor (Untertabs) ----------
+        ${!s ? `<label class="checkline"><input id="sf-tpl" type="checkbox" checked/> Dutys automatisch aus dem Tagesplan laden</label>` : ""}
 
-function superTabBtn(t, label, icon) {
-  return `<button class="tab ${state.superTab === t ? "active" : ""}" onclick="VBG.setSuperTab('${t}')">${icon} ${label}</button>`;
-}
-
-async function renderSupervisor(main) {
-  main.innerHTML = `
-    <h1 style="margin:0 0 6px;font-size:20px">Supervisor-Bereich</h1>
-    <p class="muted" style="margin:0 0 14px">Nutzer, Lizenzen, Wünsche, Anmeldungen und Warnungen.</p>
-    <div class="tabs">
-      ${superTabBtn("users", "Nutzer", "👤")}
-      ${superTabBtn("linien", "Linien & Lizenzen", "🎫")}
-      ${superTabBtn("wishes", "Wünsche", "⭐")}
-      ${superTabBtn("apps", "Anmeldungen", "📥")}
-      ${superTabBtn("warns", "Warnungen", "⚠️")}
-    </div>
-    <div id="super-content"></div>`;
-  const content = document.getElementById("super-content");
-  if (state.superTab === "users") await renderSuperUsers(content);
-  else if (state.superTab === "linien") await renderSuperLinien(content);
-  else if (state.superTab === "wishes") await renderSuperWishes(content);
-  else if (state.superTab === "apps") await renderSuperApps(content);
-  else if (state.superTab === "warns") await renderSuperWarns(content);
-}
-
-function setSuperTab(t) {
-  state.superTab = t;
-  renderSupervisor(document.getElementById("main"));
-}
-
-// --- Untertab: Nutzer ---
-
-async function renderSuperUsers(content) {
-  await loadUsers();
-  content.innerHTML = `
-    <div class="spread" style="margin-bottom:12px">
-      <h2 style="margin:0">Nutzerverwaltung</h2>
-      <button class="btn" onclick="VBG.showUserForm()">+ Nutzer anlegen</button>
-    </div>
-    <div id="user-form"></div>
-    <div class="container">
-      <table>
-        <tr><th>Nutzer</th><th>Rolle</th><th>Linien-Lizenzen</th><th>Status</th><th></th></tr>
-        ${state.users.map((u) => `
-        <tr>
-          <td><b>${h(u.username)}</b>${u.protected ? ' <span class="badge violet">geschützt</span>' : ""}</td>
-          <td>${u.role === "supervisor" ? '<span class="crown">&#9813; Supervisor</span>' : h(u.roleLabel || u.role)}</td>
-          <td>${(u.linien || []).length ? u.linien.map((l) => `<span class="badge ${linieCls(l)}">${h(linieName(l))}</span>`).join(" ") : '<span class="muted">–</span>'}</td>
-          <td>${u.suspended ? '<span class="badge red">gesperrt</span>' : '<span class="badge green">aktiv</span>'}</td>
-          <td class="flex">
-            ${u.protected ? '<span class="muted">unlöschbar / nicht sperrbar</span>' : `
-            <button class="btn btn-ghost btn-sm" onclick="VBG.showEditUserForm('${u.id}')">Bearbeiten</button>
-            <button class="btn btn-ghost btn-sm" onclick="VBG.showPwForm('${u.id}')">Passwort</button>
-            <button class="btn btn-sm ${u.suspended ? "btn-green" : "btn-yellow"}" onclick="VBG.toggleSuspend('${u.id}')">${u.suspended ? "Entsperren" : "Sperren"}</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.deleteUser('${u.id}')">Löschen</button>`}
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>`;
-}
-
-function roleOptions(sel) {
-  return [
-    ["supervisor", "Supervisor"],
-    ["senior", "Senior Busfahrer"],
-    ["user", "Busfahrer"],
-  ].map(([v, l]) => `<option value="${v}" ${sel === v ? "selected" : ""}>${l}</option>`).join("");
-}
-
-function showUserForm() {
-  const lin = state.cats.linien.map((l) =>
-    `<label class="checkline"><input type="checkbox" name="linien" value="${l.id}">${h(l.name)} ${l.label ? "(" + h(l.label) + ")" : ""}</label>`).join("");
-  document.getElementById("user-form").innerHTML = `
-    <div class="container">
-      <h2>Neuen Nutzer anlegen</h2>
-      <div class="form-grid">
-        <input id="uf-user" placeholder="Benutzername" />
-        <input id="uf-pass" type="password" placeholder="Passwort" />
-        <select id="uf-role">${roleOptions("user")}</select>
-      </div>
-      <fieldset><legend>Linien-Lizenzen (19, (SB)24, 8, N1)</legend>${lin || '<span class="muted">keine Linien vorhanden</span>'}</fieldset>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.createUser()">Anlegen</button>
-        <button class="btn btn-ghost" onclick="VBG.hideUserForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-function hideUserForm() { document.getElementById("user-form").innerHTML = ""; }
-
-function showEditUserForm(id) {
-  const u = state.users.find((x) => x.id === id);
-  const lin = state.cats.linien.map((l) =>
-    `<label class="checkline"><input type="checkbox" name="linien" value="${l.id}" ${(u.linien || []).includes(l.id) ? "checked" : ""}>${h(l.name)} ${l.label ? "(" + h(l.label) + ")" : ""}</label>`).join("");
-  document.getElementById("user-form").innerHTML = `
-    <div class="container">
-      <h2>Nutzer bearbeiten – ${h(u.username)}</h2>
-      <div class="form-grid">
-        <select id="uf-role">${roleOptions(u.role)}</select>
-      </div>
-      <fieldset><legend>Linien-Lizenzen (19, (SB)24, 8, N1)</legend>${lin || '<span class="muted">keine Linien vorhanden</span>'}</fieldset>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.saveUserEdits('${id}')">Speichern</button>
-        <button class="btn btn-ghost" onclick="VBG.hideUserForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-
-function showPwForm(id) {
-  const u = state.users.find((x) => x.id === id);
-  document.getElementById("user-form").innerHTML = `
-    <div class="container">
-      <h2>Passwort für ${h(u.username)}</h2>
-      <input id="pw-pass" type="password" placeholder="Neues Passwort" style="width:100%" />
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.savePassword('${id}')">Speichern</button>
-        <button class="btn btn-ghost" onclick="VBG.hideUserForm()">Abbrechen</button>
-      </div>
-    </div>`;
-}
-
-// --- Untertab: Linien & Lizenzen ---
-
-async function renderSuperLinien(content) {
-  await loadCats();
-  const lin = state.cats.linien.map((l) => `
-    <tr><td><b>${h(l.name)}</b> <span class="muted">${h(l.label || "")}</span></td>
-    <td class="flex">
-      <button class="btn btn-ghost btn-sm" onclick="VBG.showLinieLicenses('${l.id}')">Lizenzen vergeben</button>
-      <button class="btn btn-danger btn-sm" onclick="VBG.delLinie('${l.id}')">Löschen</button>
-    </td></tr>`).join("");
-  content.innerHTML = `
-    <h2 style="margin:0 0 4px">Linien &amp; Lizenzen</h2>
-    <p class="muted" style="margin:0 0 12px">Lizenzen sind LINIEN-basiert: wer eine Linie (z.B. 19) besitzt, kann Dutys dieser Linie fahren – jeweils mit passendem Fahrzeugtyp laut Fahrplan.</p>
-    <div class="container">
-      <table><tr><th>Linie</th><th></th></tr>${lin}</table>
-      <div class="flex" style="margin-top:10px">
-        <input id="linne-name" placeholder="z.B. 19" style="width:120px" />
-        <input id="linne-label" placeholder="Beschreibung (z.B. Stümp Voiskamp – GVZ)" style="flex:1" />
-        <button class="btn" onclick="VBG.addLinie()">+ Hinzufügen</button>
-      </div>
-    </div>`;
-}
-
-function showLinieLicenses(linieId) {
-  const lin = state.cats.linien.find((l) => l.id === linieId);
-  document.getElementById("ll-list").innerHTML = "";
-  const box = document.createElement("div");
-  box.className = "container";
-  box.style.marginTop = "10px";
-  let rows = "";
-  state.users.forEach((u) => {
-    if (u.role === "supervisor") return;
-    const has = (u.linien || []).includes(linieId);
-    rows += `
-      <div class="flex" style="justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)">
-        <span><b>${h(u.username)}</b> <span class="muted">(${h(u.roleLabel || u.role)})</span></span>
-        <label class="checkline"><input type="checkbox" id="llc-${u.id}" ${has ? "checked" : ""} onchange="VBG.setLinieLicense('${u.id}','${linieId}', this.checked)" /> Lizenz ${h(lin ? lin.name : "")}</label>
+        <div class="flex" style="margin-top:10px">
+          <button class="btn btn-green" onclick="VBG.saveShift('${sId}')">Speichern</button>
+          <button class="btn btn-ghost" onclick="VBG.hideShiftForm()">Abbrechen</button>
+        </div>
       </div>`;
-  });
-  box.innerHTML = `<h2>Lizenz „${h(lin ? lin.name : "")}“ vergeben</h2>` + (rows || `<div class="empty">Keine Fahrer vorhanden.</div>`);
-  document.getElementById("main").appendChild(box);
-}
-
-// --- Untertab: Wünsche ---
-
-async function renderSuperWishes(content) {
-  const r = await api("GET", "/api/wishes");
-  const wishes = r.wishes;
-  content.innerHTML = `
-    <h2 style="margin:0 0 4px">Zuteilungswünsche</h2>
-    <p class="muted" style="margin:0 0 12px">Fahrer wünschen hier Dutys, für die sie die Linien-Lizenz besitzen.</p>
-    ${!wishes.filter((w) => w.status === "pending").length ? `<div class="empty">Keine offenen Wünsche.</div>` : ""}
-    <div class="container">
-      <table>
-        <tr><th>Status</th><th>Nutzer</th><th>Duty</th><th>Linie</th><th>Shift</th><th>Fahrzeug</th><th>Zeit</th><th></th></tr>
-        ${wishes.map((w) => `
-        <tr>
-          <td><span class="badge ${w.status === "pending" ? "yellow" : w.status === "accepted" ? "green" : "red"}">${h(w.status)}</span></td>
-          <td>${h(w.username)}</td>
-          <td>${h(w.dutyName)}</td>
-          <td><span class="badge ${linieCls(w.linie)}">${h(w.linie || "–")}</span></td>
-          <td>${h(w.shiftName)}</td>
-          <td>${h(w.vehicleName || "–")}</td>
-          <td class="muted">${fmtTime(w.createdAt)}</td>
-          <td class="flex">
-            ${w.status === "pending" ? `
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptWish('${w.id}')">Zuteilen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyWish('${w.id}')">Ablehnen</button>` : `
-            <button class="btn btn-ghost btn-sm" onclick="VBG.deleteWish('${w.id}')">Entfernen</button>`}
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>`;
-}
-
-// --- Untertab: Anmeldungen ---
-
-async function renderSuperApps(content) {
-  const r = await api("GET", "/api/applications");
-  const apps = r.applications;
-  content.innerHTML = `
-    <h2 style="margin:0 0 4px">Shift-Anmeldungen</h2>
-    <p class="muted" style="margin:0 0 12px">Fahrer melden sich hier für Shifts an. Danach teilst du sie manuell Dutys zu (Lizenzprüfung).</p>
-    <div class="container">
-      <table>
-        <tr><th>Nutzer</th><th>Shift</th><th>von–bis</th><th>Nachricht</th><th>Linien</th><th>Status</th><th>Zeit</th><th></th></tr>
-        ${!apps.length ? `<tr><td colspan="8"><div class="empty">Noch keine Anmeldungen.</div></td></tr>` : apps.map((a) => `
-        <tr>
-          <td><b>${h(a.username)}</b> <span class="muted">(${h(a.roleLabel || a.role)})</span></td>
-          <td>${h(a.shiftName)}</td>
-          <td>${h(a.shiftStart)}–${h(a.shiftEnd)}</td>
-          <td>${h(a.note || "–")}</td>
-          <td>${(a.linien || []).length ? a.linien.map((l) => `<span class="badge ${linieCls(l)}">${h(linieName(l))}</span>`).join(" ") : "–"}</td>
-          <td><span class="badge ${a.status === "accepted" ? "green" : a.status === "denied" ? "red" : "yellow"}">${h(a.status)}</span></td>
-          <td class="muted">${fmtTime(a.createdAt)}</td>
-          <td class="flex">
-            ${a.status === "pending" ? `
-            <button class="btn btn-green btn-sm" onclick="VBG.acceptApp('${a.id}')">Annehmen</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.denyApp('${a.id}')">Ablehnen</button>` : `
-            <button class="btn btn-ghost btn-sm" onclick="VBG.deleteApp('${a.id}')">Entfernen</button>`}
-          </td>
-        </tr>`).join("")}
-      </table>
-    </div>`;
-}
-
-// --- Untertab: Warnungen ---
-
-async function renderSuperWarns(content) {
-  const [wr, ur] = await Promise.all([api("GET", "/api/warns"), api("GET", "/api/users")]);
-  state.users = ur.users;
-  const warns = wr.warns;
-  const driverOpts = `<option value="">— Fahrer wählen —</option>` +
-    ur.users.filter((u) => u.role !== "supervisor").map((u) => `<option value="${u.id}">${h(u.username)}</option>`).join("");
-  content.innerHTML = `
-    <h2 style="margin:0 0 4px">Warn-System</h2>
-    <p class="muted" style="margin:0 0 12px"><b style="color:var(--yellow)">AB 3 STUNDEN MUSS ABGEARBEITET WERDEN.</b></p>
-    <div class="container">
-      <h2>Neue Warnung</h2>
-      <div class="form-grid">
-        <select id="wf-user">${driverOpts}</select>
-        <input id="wf-grund" placeholder="Grund (z.B. Nicht erschienen)" />
-        <input id="wf-stunden" type="number" min="0" step="0.5" value="3" />
-        <input id="wf-frist" placeholder="Frist (z.B. 15.10.2026)" />
-      </div>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn btn-green" onclick="VBG.addWarn()">Warnung erfassen</button>
-      </div>
-    </div>
-    <div class="container">
-      <table>
-        <tr><th>Nutzer</th><th>Grund</th><th>Stunden</th><th>Abgearbeitet</th><th>Frist</th><th>Status</th><th>Zeit</th><th></th></tr>
-        ${!warns.length ? `<tr><td colspan="8"><div class="empty">Noch keine Warnungen.</div></td></tr>` : warns.map((w) => {
-          const rest = Math.max(0, (w.stunden || 0) - (w.abgearbeitet || 0));
-          return `
-        <tr class="${w.abgeschlossen ? "" : rest >= 3 ? "warn-hot" : ""}">
-          <td><b>${h(w.username)}</b></td>
-          <td>${h(w.grund)}</td>
-          <td><b>${h(w.stunden)}</b> Std.</td>
-          <td>${h(w.abgearbeitet)} Std.</td>
-          <td>${h(w.frist || "–")}</td>
-          <td><span class="badge ${w.abgeschlossen ? "green" : rest >= 3 ? "red" : "yellow"}">${w.abgeschlossen ? "erledigt" : rest >= 3 ? "offen (≥3 Std.)" : rest + " Std. Rest"}</span></td>
-          <td class="muted">${fmtTime(w.createdAt)}</td>
-          <td class="flex">
-            ${!w.abgeschlossen ? `
-            <button class="btn btn-yellow btn-sm" onclick="VBG.addWarnHours('${w.id}', 0.5)">+0,5</button>
-            <button class="btn btn-yellow btn-sm" onclick="VBG.addWarnHours('${w.id}', 1)">+1</button>` : ""}
-            <button class="btn btn-ghost btn-sm" onclick="VBG.toggleWarn('${w.id}')">${w.abgeschlossen ? "Wieder öffnen" : "Abschließen"}</button>
-            <button class="btn btn-danger btn-sm" onclick="VBG.delWarn('${w.id}')">Löschen</button>
-          </td>
-        </tr>`;}).join("")}
-      </table>
-    </div>`;
-}
-
-// ---------- Benachrichtigungen ----------
-
-function renderNotifBadge() {
-  const unread = state.notifications.filter((n) => !n.read).length;
-  const btn = document.getElementById("notif-btn");
-  if (!btn) return;
-  btn.innerHTML = BELL_SVG + (unread ? `<span class="badge">${unread}</span>` : "");
-  const drop = document.getElementById("notif-drop");
-  drop.innerHTML = `
-    <div class="head">
-      <span>Benachrichtigungen</span>
-      <button class="btn btn-ghost btn-xs" onclick="VBG.readAllNotifs(event)">Alle gelesen</button>
-    </div>
-    ${!state.notifications.length ? `<div class="notif-empty">Keine Benachrichtigungen</div>` :
-      state.notifications.slice(0, 50).map((n) => `
-      <div class="notif-item ${n.read ? "" : "unread"}" onclick="VBG.readNotif('${n.id}', event)">
-        <span class="tag ${n.type}">${h(n.type)}</span>
-        <div>${h(n.message)}</div>
-        <div class="time">${fmtTime(n.createdAt)}</div>
-      </div>`).join("")}`;
-}
-
-let polling = false;
-function startPolling() {
-  if (polling) return;
-  polling = true;
-  setInterval(() => pollNotifications(), 30000);
-}
-
-async function pollNotifications(initial) {
-  if (!state.user) return;
-  try {
-    const r = await api("GET", "/api/notifications");
-    const fresh = r.notifications.filter((n) => n.createdAt > state.lastSeen);
-    state.lastSeen = r.notifications.length ? r.notifications[0].createdAt : state.lastSeen;
-    localStorage.setItem("vbg_notif_seen", state.lastSeen);
-    if (!initial && fresh.length && document.hasFocus()) {
-      fresh.slice(0, 5).forEach((n) => showDesktop(n));
-    }
-    state.notifications = r.notifications;
-    if (state.view) {
-      const btn = document.getElementById("notif-btn");
-      if (btn) renderNotifBadge();
-    }
-  } catch (e) { /* offline usw. */ }
-}
-
-function showDesktop(n) {
-  if (!("Notification" in window) || Notification.permission !== "granted") return;
-  try {
-    new Notification("VBG Website", { body: n.message, tag: n.id });
-  } catch (e) { /* ignore */ }
-}
-
-function requestNotifPermissionIfPossible() {
-  if (!("Notification" in window)) return;
-  if (Notification.permission === "default") {
-    Notification.requestPermission();
   }
-}
-function requestNotifPermission(force) {
-  if (!("Notification" in window)) return toast("Desktop-Benachrichtigungen werden nicht unterstützt", "err");
-  Notification.requestPermission().then((perm) => {
-    toast(perm === "granted" ? "Desktop-Benachrichtigungen aktiviert" : "Keine Berechtigung", perm === "granted" ? "ok" : "err");
-  });
-}
 
-// ---------- Aktionen (VBG-Public-API) ----------
+  function renderShiftFormInline(s) {
+    document.getElementById("shift-form").innerHTML = shiftFormHtml(s);
+  }
 
-const VBG = {
-  setView,
-  openShift: (id) => { state.currentShiftId = id; setView("shiftDetail"); },
-  openVehicleDuties,
+  // ---------- Shiftplan ----------
+  function renderShiftplanView() {
+    const shiftsReal = realShifts();
+    const selector = `
+      <div class="spread">
+        <h2>Shiftplan</h2>
+        <select style="min-width:260px" onchange="VBG.selectPlanShift(this.value)">
+          <option value="">— Shift wählen —</option>
+          ${shiftsReal.map((s) => `<option value="${s.id}" ${s.id === state.planShiftId ? "selected" : ""}>${h(s.name)} ${s.date ? "(" + h(s.date) + ")" : ""}</option>`).join("")}
+        </select>
+      </div>`;
 
-  // Shifts
-  showShiftForm, cancelShiftForm, editShift, showCopyForm,
-  async createShift() {
-    try {
-      await api("POST", "/api/shifts", {
-        name: v("sf-name"), date: v("sf-date"), notes: v("sf-notes"),
-        startTime: v("sf-start"), endTime: v("sf-end"),
-      });
-      toast("Shift angelegt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadShifts(); await renderView();
-  },
-  async updateShift(id) {
-    try {
-      await api("PATCH", "/api/shifts/" + id, {
-        name: v("sf-name"), date: v("sf-date"), notes: v("sf-notes"),
-        startTime: v("sf-start"), endTime: v("sf-end"),
-      });
-      toast("Shift gespeichert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadShifts(); await renderView();
-  },
-  async copyShift(id) {
-    try {
-      await api("POST", "/api/shifts/" + id + "/copy", { name: v("cf-name"), date: v("cf-date") });
-      toast("Shift übernommen – Dutys sind kopiert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadShifts(); await renderView();
-  },
-  async deleteShift(id) {
-    if (!confirm("Shift wirklich löschen? Alle Dutys dieser Shift werden entfernt.")) return;
-    try { await api("DELETE", "/api/shifts/" + id); toast("Shift gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await loadShifts(); await renderView();
-  },
-
-  // Dutys
-  showDutyForm, hideDutyForm,
-  async createDuty(shiftId) {
-    try {
-      await api("POST", "/api/shifts/" + shiftId + "/duties", {
-        name: v("df-name"), linieId: v("df-linie") || null, vehicleId: v("df-vehicle") || null,
-        notes: v("df-notes"), startTime: v("df-start"), endTime: v("df-end"),
-        linienwechsel: v("df-wechsel"),
-      });
-      toast("Duty angelegt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async deleteDuty(id) {
-    if (!confirm("Duty wirklich löschen?")) return;
-    try { await api("DELETE", "/api/duties/" + id); toast("Duty gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Fahrten
-  async addTrip(dutyId) {
-    try {
-      await api("POST", `/api/duties/${dutyId}/trips`, {
-        from: v(`t-${dutyId}-from`), to: v(`t-${dutyId}-to`), dep: v(`t-${dutyId}-dep`), arr: v(`t-${dutyId}-arr`),
-      });
-      toast("Fahrt hinzugefügt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  toggleTripEdit(dutyId, tripId) {
-    state.editTrip = state.editTrip || {};
-    state.editStop = state.editStop || {};
-    state.editTrip[dutyId] = state.editTrip[dutyId] === tripId ? null : tripId;
-    if (state.editTrip[dutyId]) delete state.editStop[tripId];
-    renderView();
-  },
-  async saveTrip(dutyId, tripId) {
-    try {
-      await api("PATCH", `/api/duties/${dutyId}/trips/${tripId}`, {
-        from: v(`te-${tripId}-from`), to: v(`te-${tripId}-to`),
-        dep: v(`te-${tripId}-dep`), arr: v(`te-${tripId}-arr`),
-        vehicleId: v(`te-${tripId}-vehicle`) || null,
-        cancelled: chk(`te-${tripId}-cancel`),
-        cancelNote: v(`te-${tripId}-note`),
-      });
-      state.editTrip = state.editTrip || {};
-      delete state.editTrip[dutyId];
-      toast("Fahrt gespeichert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async deleteTrip(dutyId, tripId) {
-    if (!confirm("Fahrt löschen?")) return;
-    try { await api("DELETE", `/api/duties/${dutyId}/trips/${tripId}`); toast("Fahrt gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Halte
-  async addStop(dutyId, tripId) {
-    try {
-      await api("POST", `/api/duties/${dutyId}/trips/${tripId}/stops`, {
-        station: v(`ns-${tripId}-st`), arr: v(`ns-${tripId}-arr`), dep: v(`ns-${tripId}-dep`),
-      });
-      toast("Halt hinzugefügt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  toggleStopEdit(dutyId, tripId, stopId) {
-    state.editStop = state.editStop || {};
-    state.editTrip = state.editTrip || {};
-    state.editStop[tripId] = state.editStop[tripId] === stopId ? null : stopId;
-    if (state.editStop[tripId] === null) delete state.editStop[tripId];
-    if (state.editStop[tripId]) delete state.editTrip[dutyId];
-    renderView();
-  },
-  async saveStop(dutyId, tripId, stopId) {
-    try {
-      await api("PATCH", `/api/duties/${dutyId}/trips/${tripId}/stops/${stopId}`, {
-        station: v(`se-${stopId}-st`), arr: v(`se-${stopId}-arr`), dep: v(`se-${stopId}-dep`),
-        cancelled: chk(`se-${stopId}-cancel`),
-      });
-      state.editStop = state.editStop || {};
-      delete state.editStop[tripId];
-      toast("Halt gespeichert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async deleteStop(dutyId, tripId, stopId) {
-    if (!confirm("Halt löschen?")) return;
-    try { await api("DELETE", `/api/duties/${dutyId}/trips/${tripId}/stops/${stopId}`); toast("Halt gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Zuteilung (Lizenz-Check serverseitig)
-  async unassignDuty(id) {
-    try { await api("PATCH", "/api/duties/" + id, { assignedUserId: null }); toast("Zuteilung gelöst", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async wishDuty(id) {
-    try { await api("POST", "/api/duties/" + id + "/wish"); toast("Duty-Wunsch gesendet – Supervisor benachrichtigt", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  async acceptWish(id) {
-    try { await api("POST", "/api/wishes/" + id + "/accept"); toast("Zugewiesen", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async denyWish(id) {
-    try { await api("POST", "/api/wishes/" + id + "/deny"); toast("Abgelehnt", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async deleteWish(id) {
-    try { await api("DELETE", "/api/wishes/" + id); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Shift-Anmeldungen
-  async applyShift(shiftId) {
-    const note = v("app-note");
-    try {
-      await api("POST", `/api/shifts/${shiftId}/apply`, { note });
-      toast("Anmeldung gesendet – Supervisor benachrichtigt", "ok");
-      await loadMyApps();
-      await renderView();
-    } catch (e) { toast(e.message, "err"); }
-  },
-  async acceptApp(id) {
-    try { await api("POST", "/api/applications/" + id + "/accept"); toast("Anmeldung angenommen", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async denyApp(id) {
-    try { await api("POST", "/api/applications/" + id + "/deny"); toast("Anmeldung abgelehnt", "ok"); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async deleteApp(id) {
-    try { await api("DELETE", "/api/applications/" + id); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Supervisor-Tabs
-  setSuperTab,
-
-  // Nutzer
-  showUserForm, hideUserForm, showEditUserForm, showPwForm,
-  async createUser() {
-    try {
-      await api("POST", "/api/users", {
-        username: v("uf-user"), password: v("uf-pass"),
-        role: v("uf-role") || "user", linien: checkedVals("linien"),
-      });
-      toast("Nutzer angelegt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadUsers(); await renderView();
-  },
-  async saveUserEdits(id) {
-    try {
-      await api("PATCH", "/api/users/" + id, { role: v("uf-role") || "user", linien: checkedVals("linien") });
-      toast("Nutzer gespeichert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadUsers(); await renderView();
-  },
-  async savePassword(id) {
-    try { await api("PATCH", "/api/users/" + id, { password: v("pw-pass") }); toast("Passwort gesetzt", "ok"); } catch (e) { toast(e.message, "err"); }
-  },
-  async toggleSuspend(id) {
-    try { await api("POST", "/api/users/" + id + "/suspend"); await loadUsers(); await renderView(); } catch (e) { toast(e.message, "err"); }
-  },
-  async deleteUser(id) {
-    if (!confirm("Nutzer wirklich löschen?") || !confirm("Wirklich? Nicht rückgängig machbar.")) return;
-    try { await api("DELETE", "/api/users/" + id); toast("Nutzer gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await loadUsers(); await renderView();
-  },
-
-  // Linien & Lizenzen
-  async addLinie() {
-    try { await api("POST", "/api/linien", { name: v("linne-name"), label: v("linne-label") }); toast("Linie hinzugefügt", "ok"); } catch (e) { toast(e.message, "err"); }
-    await loadCats(); await renderView();
-  },
-  async delLinie(id) {
-    if (!confirm("Linie löschen?")) return;
-    try { await api("DELETE", "/api/linien/" + id); toast("Gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await loadCats(); await renderView();
-  },
-  showLinieLicenses,
-  async setLinieLicense(userId, linieId, on) {
-    try {
-      const u = state.users.find((x) => x.id === userId);
-      if (!u) return;
-      const linien = (u.linien || []).filter((x) => x !== linieId);
-      if (on) linien.push(linieId);
-      await api("PATCH", "/api/users/" + userId, { linien });
-      toast(on ? "Lizenz erteilt" : "Lizenz entzogen", "ok");
-    } catch (e) { toast(e.message, "err"); }
-  },
-
-  // Fahrzeuge
-  showVehicleForm, hideVehicleForm,
-  async createVehicle() {
-    try {
-      await api("POST", "/api/fahrzeuge", {
-        wagennummer: v("vf-wagen"), kennzeichen: v("vf-kz"),
-        typ: v("vf-typ"), art: v("vf-art"), status: v("vf-status"),
-        ort: v("vf-ort"), bemerkung: v("vf-bem"),
-      });
-      toast("Fahrzeug angelegt", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadCats(); await renderView();
-  },
-  async saveVehicleStatus(id) {
-    try {
-      await api("PATCH", "/api/fahrzeuge/" + id, { status: v("vs-" + id), ort: v("vo-" + id) });
-      toast("Fahrzeug-Status gespeichert", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await loadCats(); await renderView();
-  },
-  async delVehicle(id) {
-    if (!confirm("Fahrzeug löschen? Dutys ohne Fahrzeug bleiben erhalten.")) return;
-    try { await api("DELETE", "/api/fahrzeuge/" + id); toast("Gelöscht", "ok"); } catch (e) { toast(e.message, "err"); }
-    await loadCats(); await renderView();
-  },
-
-  // Warnungen
-  async addWarn() {
-    try {
-      await api("POST", "/api/warns", {
-        userId: v("wf-user"), grund: v("wf-grund"),
-        stunden: Number(v("wf-stunden")) || 3, frist: v("wf-frist"),
-      });
-      toast("Warnung erfasst", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async addWarnHours(id, x) {
-    try {
-      const data = await api("GET", "/api/warns");
-      const w = data.warns.find((y) => y.id === id);
-      if (!w) return;
-      const newDone = Math.min((w.abgearbeitet || 0) + x, w.stunden || 0);
-      await api("PATCH", "/api/warns/" + id, { abgearbeitet: newDone });
-      toast("Abgearbeitet: " + newDone + " Std.", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async toggleWarn(id) {
-    try {
-      const data = await api("GET", "/api/warns");
-      const w = data.warns.find((y) => y.id === id);
-      if (!w) return;
-      await api("PATCH", "/api/warns/" + id, { abgeschlossen: !w.abgeschlossen });
-      toast(w.abgeschlossen ? "Warnung wieder geöffnet" : "Warnung abgeschlossen", "ok");
-    } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-  async delWarn(id) {
-    if (!confirm("Warnung löschen?")) return;
-    try { await api("DELETE", "/api/warns/" + id); } catch (e) { toast(e.message, "err"); }
-    await renderView();
-  },
-
-  // Notifications
-  async readNotif(id, ev) {
-    if (ev) ev.stopPropagation();
-    try { await api("POST", "/api/notifications/" + id + "/read"); } catch (e) { /* ignore */ }
-    const n = state.notifications.find((x) => x.id === id);
-    if (n) n.read = true;
-    renderNotifBadge();
-  },
-  async readAllNotifs(ev) {
-    if (ev) ev.stopPropagation();
-    try { await api("POST", "/api/notifications/read-all"); } catch (e) { /* ignore */ }
-    state.notifications.forEach((n) => (n.read = true));
-    renderNotifBadge();
-  },
-};
-
-function v(id) {
-  const el = document.getElementById(id);
-  return el ? el.value.trim() : "";
-}
-function chk(id) {
-  const el = document.getElementById(id);
-  return el ? el.checked : false;
-}
-function checkedVals(name) {
-  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map((x) => x.value);
-}
-
-// ---------- Boot ----------
-
-async function doLogout() {
-  try { await api("POST", "/api/auth/logout"); } catch (e) { /* ignore */ }
-  Auth.clear();
-  state.user = null;
-  state.notifications = [];
-  polling = false;
-  render();
-}
-
-async function boot() {
-  const token = Auth.getToken();
-  if (token) {
-    try {
-      const r = await api("GET", "/api/auth/me");
-      state.user = r.user;
-      await loadCats();
-      if (state.user.role === "supervisor") await Promise.all([loadUsers(), loadShifts()]);
-      else await loadShifts();
-      await loadMyApps();
-      await pollNotifications(true);
-      render();
-      startPolling();
-    } catch (e) {
-      state.user = null;
-      render();
+    if (!state.planShiftId) {
+      return selector + `<div class="container"><div class="empty">Wähle eine Shift, um den Shiftplan zu sehen.</div></div>`;
     }
-  } else {
+
+    if (!state.plan) {
+      loadPlan().then(() => render());
+      return selector + `<div class="spinner">Lade Shiftplan…</div>`;
+    }
+
+    const plan = state.plan;
+    const shift = plan.shift;
+    const duties = plan.duties || [];
+
+    const kunden = KUNDENSERVICE_STATE.items || [];
+
+    let html = selector;
+
+    // Host / Co-Supervisoren (für alle sichtbar)
+    html += `
+      <div class="container">
+        <div class="spread">
+          <div><b>${h(shift.name)}</b>
+            ${shift.date ? `<span class="muted"> · ${h(shift.date)}</span>` : ""}
+            ${shift.startTime ? `<span class="muted"> · ${h(shift.startTime)}–${h(shift.endTime)}</span>` : ""}
+          </div>
+          <div class="muted">
+            Host: <b>${h(shift.hostName || "–")}</b>
+            ${(shift.coSupervisorNames || []).length ? ` · Co: ${shift.coSupervisorNames.map((n) => h(n)).join(", ")}` : ""}
+          </div>
+        </div>
+      </div>`;
+
+    // ---- Kundenservice-Block ----
+    html += `
+      <div class="container">
+        <div class="spread"><h2 style="margin:0">Kundenservice</h2>
+          ${isSup() ? `<button class="btn btn-sm" onclick="VBG.addStandort()">+ Standort</button>` : ""}
+        </div>
+        <p class="muted" style="margin:6px 0 12px">Anmeldung jederzeit möglich – mindestens 30 Minuten am Stück.
+        Pro Person und Shift gilt nur EINE Funktion (Kundenservice <b>oder</b> Busfahren).</p>
+        ${kunden.length === 0 ? `<div class="empty">Keine Standorte vorhanden.</div>` : `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">
+          ${kunden.map((k) => `
+            <div class="duty-card" style="margin:0">
+              <div class="duty-head">
+                <b>${h(k.name)}</b>
+                ${isSup() ? `<span>
+                  <button class="btn btn-ghost btn-xs" onclick="VBG.renameStandort('${k.id}')">Umbenennen</button>
+                  <button class="btn btn-danger btn-xs" onclick="VBG.delStandort('${k.id}')">×</button>
+                </span>` : ""}
+              </div>
+              <div style="margin-top:8px">
+                <button class="btn btn-sm" onclick="VBG.kundenserviceSignup('${k.id}')">Dafür anmelden</button>
+              </div>
+            </div>`).join("")}
+          </div>`}
+        <div id="standort-form"></div>
+      </div>`;
+
+    // ---- Dutys ----
+    if (duties.length === 0) {
+      html += `<div class="container"><div class="empty">Diese Shift hat noch keine Dutys.</div>
+        ${isSup() ? `<div style="text-align:center"><button class="btn btn-yellow" onclick="VBG.reloadFromTpl()">Aus Tagesplan nachladen</button></div>` : ""}</div>`;
+    } else {
+      duties.forEach((d) => { html += renderDutyCard(d); });
+    }
+
+    return html;
+  }
+
+  function renderDutyCard(d) {
+    const isSup_ = isSup();
+    const trips = (d.trips || []).filter((x) => !x.cancelled);
+    const cancelledTrips = (d.trips || []).filter((x) => x.cancelled);
+    const allTrips = d.trips || [];
+    const assoz = isSup_
+      ? `<span><button class="btn btn-ghost btn-xs" onclick="VBG.toggleDutyStops('${d.id}')">Haltestellen</button></span>`
+      : "";
+    const linieHinweis = d.linieName ? `<span class="badge ${linieClsId(d.linieId)}">${h(d.linieName)}</span>` : "";
+
+    let rows = "";
+    allTrips.forEach((tr, i) => {
+      const isLast = i === allTrips.length - 1;
+      const next = isLast ? null : allTrips[i + 1];
+      rows += renderTripRow(d, tr, i);
+
+      // Pause zwischen den Fahrten
+      if (next && !tr.cancelled && !next.cancelled) {
+        const p = pauseMin(tr.arr, next.dep);
+        rows += `
+          <tr class="pause-row" ${isSup_ ? `onclick="VBG.toggleDutyStops('${d.id}')" style="cursor:pointer"` : ""}>
+            <td colspan="7" style="padding:3px 10px">
+              <span class="pause-label" ${p <= 10 ? 'style="color:var(--red)"' : 'style="color:var(--muted)"'}>Pause · ${fmtMin(p)}</span>
+              <span class="muted" style="font-size:11px">→ ${h(next.from)} (${h(next.dep)})</span>
+            </td>
+          </tr>`;
+      }
+    });
+
+    const fahrtzeit = d.fahrSummeMin || 0;
+    const spanne = d.spanneMin || 0;
+    const pausen = d.pausenMin != null ? d.pausenMin : Math.max(0, spanne - fahrtzeit);
+
+    return `
+      <div class="duty-card ${d.cancelled ? "cancelled" : ""}" id="duty-${d.id}">
+        <div class="duty-head">
+          <div>
+            <div class="duty-title">
+              <span style="text-decoration:${d.cancelled ? "line-through" : "none"}">${h(d.name)}</span>
+              ${d.cancelled ? `<span class="badge red">ausgefallen</span>` : ""}
+              ${linieHinweis}
+              ${d.kurs ? `<span class="muted">Kurs ${h(d.kurs)}</span>` : ""}
+            </div>
+            <div class="duty-meta">
+              ${d.unit ? `Einheit ${h(d.unit)} · ` : ""}Dauer: <b>${fmtMin(spanne)}</b>
+              (Fahrzeit ${fmtMin(fahrtzeit)} · Pausen ${fmtMin(pausen)})
+              · benötigte Lizenz: <b>${h(d.linieName || "–")}</b>
+              ${d.startTime ? ` · ${h(d.startTime)}–${h(d.endTime)}` : ""}
+              ${d.assignedUsername ? ` · Fahrer: <b>${h(d.assignedUsername)}</b>` : ""}
+            </div>
+            ${d.bemerkung ? `<div class="duty-meta" style="color:var(--yellow)">⚠ ${h(d.bemerkung)}</div>` : ""}
+          </div>
+          ${isSup_ ? `<div class="flex">
+              ${assoz}
+              <button class="btn btn-ghost btn-xs" onclick="VBG.editDutyTimes('${d.id}')">Zeiten</button>
+              ${!d.cancelled
+                ? `<button class="btn btn-yellow btn-xs" onclick="VBG.toggleDutyCancel('${d.id}')">Ausfallen</button>`
+                : `<button class="btn btn-green btn-xs" onclick="VBG.toggleDutyCancel('${d.id}')">Wieder aktiv</button>`}
+              <button class="btn btn-danger btn-xs" onclick="VBG.deleteDuty('${d.id}')">×</button>
+            </div>` : ""}
+        </div>
+
+        ${isSup_ ? `<div class="flex" style="margin-top:10px">
+            <label class="muted" style="font-size:12px">Zuteilung (Duty):</label>
+            <select style="max-width:190px" onchange="VBG.assignDuty('${d.id}', this.value)">
+              <option value="">— ohne —</option>
+              ${state.users.filter((u) => u.role !== "supervisor").map((u) => `<option value="${u.id}" ${d.assignedUserId === u.id ? "selected" : ""}>${h(u.username)}</option>`).join("")}
+            </select>
+            <label class="muted" style="font-size:12px">Fahrzeug:</label>
+            <select style="max-width:150px" onchange="VBG.assignDutyVehicle('${d.id}', this.value)">
+              <option value="">— ohne —</option>
+              ${state.cats.fahrzeuge.map((f) => `<option value="${f.id}" ${d.vehicleId === f.id ? "selected" : ""}>${h(f.wagennummer || f.typ)}</option>`).join("")}
+            </select>
+            <label class="muted" style="font-size:12px">Bemerkung:</label>
+            <input style="max-width:220px" id="duty-bem-${d.id}" value="${h(d.bemerkung || "")}" placeholder="Bemerkung zur Duty…"
+              onchange="VBG.saveDutyBemerk('${d.id}')"/>
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:4px">Ausfall einzelner Fahrten unten am jeweiligen Trip.</div>` : ""}
+
+        <table style="margin-top:10px">
+          <thead><tr>
+            <th>Fahrt</th><th>Von</th><th>Nach</th><th>Ab</th><th>An</th><th>Fahrzeug</th><th>Bemerkungen</th>
+            ${isSup_ ? `<th style="width:190px">Aktionen</th>` : ""}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderTripRow(d, tr, idx) {
+    const isSup_ = isSup();
+    const stopsOpen = !!state.planExpandedStops[tr.id] || !!state.expandedDuties[d.id];
+    const stopsHtml = `
+      <div class="stop-box">
+        ${(tr.stops || []).length ? `
+        <ul class="stop-list">${(tr.stops || []).map((s) => `
+          <li class="${s.cancelled ? "cancelled" : ""}">
+            <span>${h(s.station)}</span>
+            <span class="muted">an ${h(s.arr)}</span>
+            ${s.cancelled ? `<span class="badge red" style="font-size:10px">ausf.</span>` : ""}
+            ${isSup_ ? `<button class="btn btn-xs btn-danger" onclick="VBG.toggleStopCancel('${d.id}','${tr.id}','${s.id}')" title="Ausfallen">✕</button>` : ""}
+          </li>`).join("")}
+        </ul>`
+        : `<div class="muted" style="font-size:12px;padding:2px 0">Keine Haltestellen</div>`}
+        ${isSup_ ? `<div class="flex"><button class="btn btn-xs" onclick="VBG.addStop('${d.id}','${tr.id}')">+ Halt</button></div>` : ""}
+      </div>`;
+
+    return `
+      <tr class="${tr.cancelled ? "cancelled-row" : ""} ${tr.leerfahrt ? "leer-row" : ""}" data-trip="${tr.id}">
+        <td>
+          ${tr.leerfahrt ? `<span class="badge gray">Leer</span>` : `<span class="muted" style="font-size:11px">${idx + 1}.</span>`}
+          ${stopsOpen ? stopsHtml : ""}
+        </td>
+        <td>${h(tr.from)}</td>
+        <td>${h(tr.to)}</td>
+        <td><b>${h(tr.dep)}</b></td>
+        <td>${h(tr.arr)}</td>
+        <td>
+          ${isSup_ && tr.leerfahrt ? fzName(tr.vehicleId)
+            : isSup_
+            ? `<select style="min-width:110px" onchange="VBG.assignTripVehicle('${d.id}','${tr.id}', this.value)">
+                <option value="">—</option>
+                ${state.cats.fahrzeuge.map((f) => `<option value="${f.id}" ${tr.vehicleId === f.id ? "selected" : ""}>${h(f.wagennummer || f.typ)}</option>`).join("")}
+              </select>`
+            : fzName(tr.vehicleId)}
+          </td>
+        <td>${h(tr.bemerkung || "")}</td>
+        ${isSup_ ? `<td>
+            <div class="flex" style="gap:6px">
+              <select style="min-width:120px" onchange="VBG.assignTrip('${d.id}','${tr.id}', this.value)" title="Einzelfahrt-Zuteilung">
+                <option value="">Fahrer…</option>
+                ${state.users.filter((u) => u.role !== "supervisor").map((u) => `<option value="${u.id}" ${tr.assignedUserId === u.id ? "selected" : ""}>${h(u.username)}</option>`).join("")}
+              </select>
+              ${tr.assignedUsername ? `<span class="muted" style="font-size:11px">${h(tr.assignedUsername)}</span>` : ""}
+              <button class="btn btn-xs" onclick="VBG.toggleTripEdit('${d.id}','${tr.id}');VBG.toggleStops('${tr.id}')" title="Bearbeiten">✎</button>
+              ${!tr.cancelled
+                ? `<button class="btn btn-yellow btn-xs" onclick="VBG.toggleTripCancel('${d.id}','${tr.id}')">Ausf.</button>`
+                : `<button class="btn btn-green btn-xs" onclick="VBG.toggleTripCancel('${d.id}','${tr.id}')">Aktiv</button>`}
+            </div>
+          </td>` : ""}
+      </tr>`;
+  }
+
+  // ---------- Anmeldung ----------
+  const KUNDENSERVICE_STATE = { items: [] };
+  async function loadKundenservice() {
+    try { const r = await api("GET", "/api/kundenservice"); KUNDENSERVICE_STATE.items = r.items || []; }
+    catch (e) { KUNDENSERVICE_STATE.items = []; }
+  }
+
+  function renderAnmeldung() {
+    const shiftsReal = realShifts();
+    const u = state.user;
+    const gesperrtBus = (u.strafstunden || 0) >= 3;
+
+    const einzelne = (state.myApps || []).find((a) => a.status === "pending") ? "" : "";
+    return `
+      <h2>Anmeldung</h2>
+
+      <div class="container">
+        <div class="form-grid">
+          <label>Shift<select id="an-shift" onchange="VBG.setAnmeldungShift(this.value)">
+            <option value="">— wählen —</option>
+            ${shiftsReal.map((s) => `<option value="${s.id}" ${s.id === state.anmeldungShiftId ? "selected" : ""}>${h(s.name)}${s.date ? " (" + h(s.date) + ")" : ""}</option>`).join("")}
+          </select></label>
+          <label>Art<select id="an-art" onchange="VBG.setAnmeldungArt(this.value)">
+            <option value="bus" ${state.anmeldungArt !== "kundenservice" ? "selected" : ""}>Busfahren</option>
+            <option value="kundenservice" ${state.anmeldungArt === "kundenservice" ? "selected" : ""}>Kundenservice</option>
+          </select></label>
+          ${state.anmeldungArt === "kundenservice" ? `<label>Standort<select id="an-standort">
+            <option value="">— wählen —</option>
+            ${KUNDENSERVICE_STATE.items.map((k) => `<option value="${k.id}">${h(k.name)}</option>`).join("")}
+          </select></label>` : ""}
+          <label>Von (Uhrzeit)<input id="an-von" type="time"/></label>
+          <label>Bis (Uhrzeit)<input id="an-bis" type="time"/></label>
+          <label>Hinweis<input id="an-hinweis" placeholder="freiwillig, z. B. nur Vormittag"/></label>
+        </div>
+
+        <div class="muted" style="margin:10px 0">
+          Mindestdauer: <b>${state.anmeldungArt === "kundenservice" ? "30 Minuten" : "1 h 15 min"}</b>
+          ${gesperrtBus && state.anmeldungArt === "bus" ? ` · <b style="color:var(--red)">Ab 3 Strafstunden nur noch Kundenservice möglich.</b>` : ""}
+        </div>
+
+        <button class="btn btn-green" onclick="VBG.submitAnmeldung()">Anmelden</button>
+      </div>
+
+      <div class="container">
+        <h2>Meine Anmeldungen</h2>
+        ${state.myApps.length === 0 ? `<div class="empty">Noch keine Anmeldungen.</div>` : `
+        <table>
+          <thead><tr><th>Shift</th><th>Art</th><th>Von–Bis</th><th>Hinweis</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${state.myApps.map((a) => `
+              <tr>
+                <td>${h(a.shiftName || "?")}</td>
+                <td>${a.art === "kundenservice" ? "Kundenservice" : "Bus"}${a.standortName ? " – " + h(a.standortName) : ""}</td>
+                <td>${h(a.von)}–${h(a.bis)}</td>
+                <td>${h(a.hinweis || "")}</td>
+                <td><span class="badge ${a.status === "accepted" ? "green" : a.status === "denied" ? "red" : "yellow"}">${a.status === "accepted" ? "angenommen" : a.status === "denied" ? "abgelehnt" : "ausstehend"}</span></td>
+                <td>${a.status === "pending" ? `<button class="btn btn-danger btn-xs" onclick="VBG.withdrawApp('${a.id}')">Zurückziehen</button>` : ""}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>`}
+      </div>`;
+  }
+
+  // ---------- Activity ----------
+  async function loadActivityMe() {
+    try { return await api("GET", "/api/activity/me"); } catch (e) { return null; }
+  }
+  async function loadActivityAll() {
+    try { return await api("GET", "/api/activity/all?zeitraum=" + state.activityRange); } catch (e) { return null; }
+  }
+
+  function renderActivity() {
+    if (isSup()) return activityAllView();
+    return activityMeView();
+  }
+
+  function activityMeView() {
+    const me = state.actMe;
+    if (!me) {
+      loadActivityMe().then((r) => { state.actMe = r; render(); });
+      return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
+    }
+    const bereit = me.fahrMin >= 60;
+    return `
+      <h2>Activity</h2>
+      <div class="card-grid">
+        <div class="stat"><div class="num">${fmtMin(me.activityMin || 0)}</div><div class="lbl">Activity-Zeit (60 % deiner Fahrzeit)</div></div>
+        <div class="stat"><div class="num">${fmtMin(me.fahrMin || 0)}</div><div class="lbl">Reine Fahrzeit (ohne Pausen)</div></div>
+        <div class="stat"><div class="num">${(me.signups || []).length}</div><div class="lbl">Activity-Anmeldungen</div></div>
+      </div>
+      <div class="container">
+        <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten reine Fahrzeit
+        (ohne Pausen) erreicht hast – darauf bekommst du 60&nbsp;% als Activity-Zeit angerechnet.</p>
+        <button class="btn btn-yellow" ${bereit ? "" : "disabled"} onclick="VBG.signupActivity()">
+          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (braucht 60 min Fahrzeit)"}
+        </button>
+      </div>`;
+  }
+
+  function activityAllView() {
+    const rows = state.actAll;
+    if (!rows) {
+      loadActivityAll().then((r) => { state.actAll = r; render(); });
+      return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
+    }
+    return `
+      <h2>Activity – alle Nutzer</h2>
+      <div class="flex" style="margin-bottom:14px">
+        <label class="muted">Zeitraum:
+          <select onchange="VBG.setActivityRange(this.value)">
+            <option value="woche" ${state.activityRange === "woche" ? "selected" : ""}>Woche</option>
+            <option value="monat" ${state.activityRange === "monat" ? "selected" : ""}>Monat</option>
+            <option value="jahr" ${state.activityRange === "jahr" ? "selected" : ""}>Jahr</option>
+            <option value="alle" ${state.activityRange === "alle" ? "selected" : ""}>Alle</option>
+          </select>
+        </label>
+      </div>
+      <div class="container">
+        <table>
+          <thead><tr><th>Nutzer</th><th>Rolle</th><th>Reine Fahrzeit</th><th>Activity (60 %)</th><th>Anmeldungen</th></tr></thead>
+          <tbody>
+            ${rows.rows.map((r) => `
+              <tr>
+                <td>${h(r.username)}</td>
+                <td>${h(r.roleLabel || "")}</td>
+                <td>${fmtMin(r.fahrMin || 0)}</td>
+                <td>${fmtMin(r.activityMin || 0)}</td>
+                <td>${r.signups || 0}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // ---------- Supervisor ----------
+  function renderSupervisor() {
+    const tabs = [
+      { id: "users", label: "Nutzer" },
+      { id: "linien", label: "Lizenzen & Linien" },
+      { id: "anmeldungen", label: "Anmeldungen" },
+      { id: "activity", label: "Activity" },
+    ];
+    const tabHtml = `<div class="tabs">${tabs.map((tb) => `<button class="tab ${state.superTab === tb.id ? "active" : ""}" onclick="VBG.setSuperTab('${tb.id}')">${tb.label}</button>`).join("")}</div>`;
+    let body = "";
+    if (state.superTab === "users") body = superUsersView();
+    else if (state.superTab === "linien") body = superLinienView();
+    else if (state.superTab === "anmeldungen") body = superAnmeldungenView();
+    else if (state.superTab === "activity") body = activityAllView();
+    return `<h2>Supervisor</h2>${tabHtml}${body}`;
+  }
+
+  function superUsersView() {
+    const rows = (state.users || []).map((u) => `
+      <tr class="${u.kündigung ? "warn-hot" : ""}">
+        <td><b>${h(u.username)}</b>
+          ${u.protected ? `<span class="crown" title="geschützt">♛</span>` : ""}
+          ${u.suspended ? `<span class="badge red">gesperrt</span>` : ""}
+          ${u.kündigung ? `<span class="badge red">Kündigung droht</span>` : ""}
+          <div class="muted" style="font-size:11px">${h(u.discordName || "–")}${u.robloxName ? " · " + h(u.robloxName) : ""}</div>
+        </td>
+        <td>${roleBadge(u.role)}</td>
+        <td>${licBadges(u.linien)}</td>
+        <td><b>${u.strafstunden || 0}</b>
+          <div class="flex" style="gap:4px">
+            <button class="btn btn-xs btn-yellow" onclick="VBG.strafe('${u.id}',+0.5)">+0,5</button>
+            <button class="btn btn-xs btn-yellow" onclick="VBG.strafe('${u.id}',+1)">+1</button>
+            <button class="btn btn-xs" onclick="VBG.strafe('${u.id}',-1)">−1</button>
+            <button class="btn btn-xs" onclick="VBG.strafe('${u.id}',-0.5)">−0,5</button>
+          </div>
+        </td>
+        <td>
+          <button class="btn btn-ghost btn-xs" onclick="VBG.editUser('${u.id}')">Bearbeiten</button>
+          <button class="btn btn-ghost btn-xs" onclick="VBG.resetPw('${u.id}')">Passwort</button>
+          ${u.protected ? "" : `
+          <button class="btn btn-xs ${u.suspended ? "btn-green" : "btn-yellow"}" onclick="VBG.toggleSuspend('${u.id}')">${u.suspended ? "Entsperren" : "Sperren"}</button>
+          <button class="btn btn-danger btn-xs" onclick="VBG.deleteUser('${u.id}')">Löschen</button>`}
+        </td>
+      </tr>`).join("");
+
+    return `
+      <div class="spread"><h3 style="margin:0">Nutzer</h3>
+        <button class="btn" onclick="VBG.showUserForm()">+ Nutzer anlegen</button>
+      </div>
+      <div id="user-form"></div>
+      <div class="container">
+        <table>
+          <thead><tr><th>Nutzer</th><th>Rolle</th><th>Lizenzen</th><th>Strafstunden</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function superLinienView() {
+    return `
+      <div class="spread"><h3 style="margin:0">Lizenzen &amp; Linien</h3>
+        <button class="btn" onclick="VBG.showLinieForm()">+ Neue Linie</button>
+      </div>
+      <div id="linie-form"></div>
+      <div class="container">
+        <p class="muted">Lizenzen werden den Personen im Tab <b>Nutzer</b> zugewiesen.
+        Hier legst du die Linien mit Namen und Beschreibung an bzw. änderst sie.</p>
+        <table>
+          <thead><tr><th>Name</th><th>Beschreibung</th><th></th></tr></thead>
+          <tbody>
+            ${state.cats.linien.map((l) => `
+              <tr>
+                <td><b>${h(l.name)}</b></td>
+                <td>${h(l.beschreibung || "")}</td>
+                <td>
+                  <button class="btn btn-ghost btn-xs" onclick="VBG.editLinie('${l.id}')">Bearbeiten</button>
+                  <button class="btn btn-danger btn-xs" onclick="VBG.delLinie('${l.id}')">Löschen</button>
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function superAnmeldungenView() {
+    const apps = state.appsAll || [];
+    const wishes = state.wishesAll || [];
+    const shiftsReal = realShifts();
+    return `
+      <h3>Anmeldungen</h3>
+      <div class="container">
+        <div class="form-grid" style="margin-bottom:10px">
+          <label>Filter Nutzer<input id="af-user" value="${h(state.appFilter.nutzer)}" onchange="VBG.setAppFilterNutzer(this.value)"/></label>
+          <label>Filter Shift<select id="af-shift" onchange="VBG.setAppFilterShift(this.value)">
+            <option value="">— alle —</option>
+            ${shiftsReal.map((s) => `<option value="${s.id}" ${state.appFilter.shift === s.id ? "selected" : ""}>${h(s.name)}</option>`).join("")}
+          </select></label>
+          <button class="btn btn-ghost" style="align-self:end" onclick="VBG.resetAppFilter()">Filter zurücksetzen</button>
+        </div>
+        ${apps.length ? `
+        <table>
+          <thead><tr><th>Nutzer</th><th>Shift</th><th>Von–Bis</th><th>Hinweis</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${apps.map((a) => `
+              <tr>
+                <td>${h(a.username)}${a.kündigung ? ` <span class="badge red" style="font-size:10px">Kündigung</span>` : ""}</td>
+                <td>${h(a.shiftName || "?")}${a.art === "kundenservice" ? ` <span class="badge sky" style="font-size:10px">KS</span>` : ""}${a.standortName ? " · " + h(a.standortName) : ""}</td>
+                <td>${h(a.von)}–${h(a.bis)}</td>
+                <td>${h(a.hinweis || "")}</td>
+                <td><span class="badge ${a.status === "accepted" ? "green" : a.status === "denied" ? "red" : "yellow"}">${a.status === "accepted" ? "angenommen" : a.status === "denied" ? "abgelehnt" : "ausstehend"}</span></td>
+                <td>
+                  <div class="flex" style="gap:4px">
+                    ${a.status === "pending" ? `
+                      <button class="btn btn-green btn-xs" onclick="VBG.acceptApp('${a.id}')">Annehmen</button>
+                      <button class="btn btn-danger btn-xs" onclick="VBG.denyApp('${a.id}')">Ablehnen</button>` : ""}
+                    <button class="btn btn-ghost btn-xs" onclick="VBG.delApp('${a.id}')">Entfernen</button>
+                  </div>
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="empty">Keine Anmeldungen ${apps === undefined ? "(Filter?)" : ""}.</div>`}
+      </div>
+
+      <h3>Wünsche</h3>
+      <div class="container">
+        <p class="muted">Wünsche von Fahrern für bestimmte Dutys – sie können hier angenommen (zugeteilt) oder abgelehnt werden.</p>
+        ${wishes.length ? `
+        <table>
+          <thead><tr><th>Nutzer</th><th>Duty</th><th>Linie</th><th>Zeit</th><th>Aktion</th></tr></thead>
+          <tbody>
+            ${wishes.map((w) => `
+              <tr>
+                <td>${h(w.username)}</td>
+                <td>${h(w.dutyName)}</td>
+                <td>${h(w.linie || "–")}</td>
+                <td class="muted">${h(w.shiftStart)}–${h(w.shiftEnd)}</td>
+                <td><div class="flex" style="gap:4px">
+                  <button class="btn btn-green btn-xs" onclick="VBG.acceptWish('${w.id}')">Zuteilen</button>
+                  <button class="btn btn-danger btn-xs" onclick="VBG.denyWish('${w.id}')">Ablehnen</button>
+                </div></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="empty">Keine offenen Wünsche.</div>`}
+      </div>`;
+  }
+
+  // ---------- Account ----------
+  const DESKTOP_KEY = "vbg_desktop_notif";
+  function desktopEnabled() { return localStorage.getItem(DESKTOP_KEY) === "1"; }
+
+  function renderAccount() {
+    const u = state.user;
+    const prof = state.profile || null;
+    const robloxEditable = prof ? prof.robloxEditable : (u && u.robloxEditable);
+    const isSelf = true;
+    void isSelf;
+    return `
+      <h2>Account</h2>
+      <div class="container">
+        <div class="spread">
+          <div>
+            <h2 style="margin:0">${h(u.username)}</h2>
+            ${roleBadge(u.role)}
+            <span class="muted">${h(u.discordName ? "Discord: " + u.discordName : "")}</span>
+          </div>
+          <span class="avatar" style="width:64px;height:64px;font-size:26px">${h(avatarLetter(u))}</span>
+        </div>
+
+        <div class="form-grid" style="margin-top:14px">
+          <label>Discord Name<input id="acc-discord" value="${h(u.discordName || "")}" placeholder="z. B. jg_gaming"/></label>
+          <label>Roblox Name<input id="acc-roblox" value="${h(u.robloxName || "")}" placeholder="z. B. jggaming2518"
+            ${!robloxEditable ? "disabled" : ""}/></label>
+          <label>Sprache der Website<select id="acc-lang">
+            <option value="de" ${u.language !== "en" ? "selected" : ""}>Deutsch</option>
+            <option value="en" ${u.language === "en" ? "selected" : ""}>English</option>
+          </select></label>
+        </div>
+        ${!robloxEditable ? `<div class="muted" style="margin-top:6px">Roblox-Name ist nur alle 6 Monate änderbar – ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : ""}
+        <div style="margin-top:12px">
+          <button class="btn btn-green" onclick="VBG.saveProfile()">Profil speichern</button>
+        </div>
+      </div>
+
+      <div class="container">
+        <h2>Eigene Lizenzen</h2>
+        ${prof && prof.linien && prof.linien.length ? `
+          ${prof.linien.map((l) => `<span class="badge ${linieClsId(l.id)}" style="margin:0 8px 8px 0">${h(l.name)} – ${h(l.beschreibung || "")}</span>`).join("")}`
+        : `<div class="muted">Noch keine Lizenzen zugewiesen.</div>`}
+      </div>
+
+      <div class="container">
+        <div class="spread"><h2 style="margin:0">Meine Zuteilungen (Shiftplan)</h2>
+          <button class="btn btn-ghost btn-sm" onclick="VBG.setView('shiftplan')">Zum Shiftplan</button>
+        </div>
+        <h3 style="margin:14px 0 6px">Duty-Zuteilungen</h3>
+        ${prof && prof.zuteilungen && prof.zuteilungen.length ? `
+          <table>
+            <thead><tr><th>Duty</th><th>Linie</th><th>Beginn</th><th>Ende</th></tr></thead>
+            <tbody>${prof.zuteilungen.map((z) => `
+              <tr><td>${h(z.name)}</td><td>${h(z.linie)}</td><td>${h(z.start)}</td><td>${h(z.end)}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="muted">Keine Duty-Zuteilungen.</div>`}
+        <h3 style="margin:14px 0 6px">Einzelfahrt-Zuteilungen</h3>
+        ${prof && prof.einzelfahrten && prof.einzelfahrten.length ? `
+          <table>
+            <thead><tr><th>Duty</th><th>Fahrt</th><th>Ab</th><th>An</th></tr></thead>
+            <tbody>${prof.einzelfahrten.map((z) => `
+              <tr><td>${h(z.dutyName)}</td><td>${h(z.from)} → ${h(z.to)}</td><td>${h(z.dep)}</td><td>${h(z.arr)}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="muted">Keine Einzelfahrt-Zuteilungen.</div>`}
+      </div>
+
+      <div class="container">
+        <div class="spread">
+          <div><h2 style="margin:0">Desktop-Benachrichtigungen</h2>
+            <span class="muted">${desktopEnabled() ? "Aktiv" : "Aus"}</span></div>
+          <button class="btn ${desktopEnabled() ? "btn-yellow" : "btn-green"}" onclick="VBG.toggleDesktop()">
+            ${desktopEnabled() ? "Deaktivieren" : "Aktivieren"}
+          </button>
+        </div>
+        <p class="muted">Erhalte eine System-Benachrichtigung, wenn eine neue (nicht dringende) Nachricht vom Supervisor eintrifft.</p>
+      </div>
+
+      <div class="container">
+        <button class="btn btn-danger" onclick="VBG.doLogout()">Abmelden</button>
+      </div>`;
+  }
+
+  // ---------- Nachrichten (Supervisor) ----------
+  function openAnnounceModal() {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2>Nachricht senden</h2>
+        <label>Text<textarea id="ann-text" rows="3" placeholder="Nachricht an die Auswahl…"></textarea></label>
+        <fieldset><legend>Zielgruppe</legend>
+          <label class="checkline"><input type="checkbox" value="user" checked/> Busfahrer</label>
+          <label class="checkline"><input type="checkbox" value="senior" checked/> Senior Busfahrer</label>
+          <label class="checkline"><input type="checkbox" value="supervisor" checked/> Supervisor</label>
+        </fieldset>
+        <label class="checkline"><input id="ann-dringend" type="checkbox"/> Dringend (rotes Overlay + Warnton)</label>
+        <div class="flex" style="margin-top:12px">
+          <button class="btn btn-green" onclick="VBG.sendAnnounce()">Senden</button>
+          <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  // ---------- Announcements (Banner + dringend-Overlay) ----------
+  let lastAnnounceKey = "";
+  let urgentShown = false;
+  async function checkAnnouncements() {
+    if (!state.user) return;
+    try {
+      const r = await api("GET", "/api/announcements/latest");
+      const { latest, unseen } = r;
+      if (!latest) { hideBanner(); state.latestAnnounce = null; return; }
+      state.latestAnnounce = latest;
+      const key = latest.id + "_" + (latest.read ? "r" : "u");
+      renderAnnounceBanner(latest, unseen);
+
+      if (unseen && latest.dringend === true && latest.id !== lastAnnounceKey) {
+        lastAnnounceKey = latest.id;
+        showUrgentOverlay(latest);
+      }
+    } catch (e) {}
+  }
+
+  function renderAnnounceBanner(latest, unseen) {
+    const slot = document.getElementById("announce-banner");
+    if (!slot) return;
+    if (!unseen) { slot.innerHTML = ""; return; }
+    slot.innerHTML = `
+      <div class="announce-banner">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path></svg>
+        <span><b>${h(latest.von || "Supervisor")}:</b> ${h(latest.message)}</span>
+        <button class="btn btn-sm btn-green" onclick="VBG.markAnnounceSeen()">Gelesen</button>
+      </div>`;
+  }
+  function hideBanner() {
+    const slot = document.getElementById("announce-banner");
+    if (slot) slot.innerHTML = "";
+  }
+
+  async function markAnnounceSeen() {
+    const n = state.latestAnnounce;
+    if (!n) return;
+    try {
+      await api("POST", "/api/notifications/" + n.id + "/read", {});
+      hideBanner();
+      lastAnnounceKey = n.id;
+      loadNotifs();
+      // Re-Poll setzt unseen auf false
+      setTimeout(checkAnnouncements, 500);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  // Dringendes Overlay mit 10-Sekunden-Sperre + Warnton (< 3,5 s)
+  function playUrgent() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const playTone = (freq, start, dur, vol) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "sine"; o.frequency.value = freq;
+        o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+        g.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + start + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+        o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.05);
+      };
+      playTone(660, 0, 0.28, 0.25);
+      playTone(520, 0.32, 0.28, 0.25);
+      playTone(660, 0.64, 0.4, 0.2);
+      setTimeout(() => ctx.close(), 3200);
+    } catch (e) {}
+  }
+
+  function showUrgentOverlay(ann) {
+    if (urgentShown) return;
+    urgentShown = true;
+    playUrgent();
+    const overlay = document.createElement("div");
+    overlay.className = "urgent-overlay";
+    overlay.innerHTML = `
+      <div class="urgent-card">
+        <div style="font-size:30px">⚠️</div>
+        <h2>Dringende Nachricht</h2>
+        <p>${h(ann.message)}</p>
+        <div class="muted">von ${h(ann.von || "Supervisor")}</div>
+        <button id="urgent-close" class="btn btn-danger" disabled>Verstanden (${10} s)</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    const btn = overlay.querySelector("#urgent-close");
+    let rest = 10;
+    const iv = setInterval(() => {
+      rest--;
+      if (rest <= 0) {
+        clearInterval(iv);
+        btn.disabled = false;
+        btn.textContent = "Verstanden";
+      } else btn.textContent = "Verstanden (" + rest + " s)";
+    }, 1000);
+    btn.onclick = () => {
+      clearInterval(iv);
+      overlay.remove();
+      urgentShown = false;
+      markAnnounceSeen();
+    };
+  }
+
+  // ---------- Notifications ----------
+  function toggleNotif(e) {
+    e.stopPropagation();
+    markSeenAllLocal();
+    state.notifOpen = !state.notifOpen;
+    renderNotifDrop();
+  }
+  function markSeenAllLocal() {
+    state.notifications.forEach((n) => (n.read = true));
+  }
+  function renderNotifDrop() {
+    const drop = document.getElementById("notif-drop");
+    if (!drop) return;
+    if (!state.notifOpen) { drop.classList.remove("open"); return; }
+    drop.classList.add("open");
+    drop.innerHTML = `
+      <div class="head"><span>Benachrichtigungen</span>
+        <button class="btn btn-ghost btn-xs" onclick="VBG.readAllNotifs(event)">Alle Gelesen</button>
+      </div>
+      ${state.notifications.length === 0 ? `<div class="notif-empty">Keine neuen Benachrichtigungen.</div>`
+        : state.notifications.map((n) => `
+          <div class="notif-item ${n.read ? "" : "unread"}" onclick="VBG.readNotif('${n.id}', event)">
+            ${n.type ? `<span class="tag ${n.type}">${h(n.type)}</span> ` : ""}
+            <span>${h(n.message)}</span>
+            <div class="time">${fmtTime(n.createdAt)}</div>
+          </div>`).join("")}`;
+    renderTopbarBadge();
+  }
+
+  // ---------- Kern-Aktionen ----------
+  async function doLogin() {
+    const username = document.getElementById("login-user").value.trim();
+    const password = document.getElementById("login-pw").value;
+    const remember = document.getElementById("login-remember").checked;
+    try {
+      const r = await api("POST", "/api/auth/login", { username, password, remember });
+      Auth.saveToken(r.token, remember);
+      state.user = r.user;
+      document.documentElement.lang = (state.user.language === "en") ? "en" : "de";
+      await bootstrapAfterLogin();
+    } catch (e) {
+      const el = document.getElementById("login-error");
+      if (el) el.textContent = e.message;
+    }
+  }
+
+  async function bootstrapAfterLogin() {
+    await refreshAll();
+    if (isSup()) await loadUsers();
+    await loadNotifs();
+    await loadKundenservice();
+    await checkAnnouncements();
+    state.plan = null;
+    state.view = "dashboard";
+    render();
+    startPolling();
+  }
+
+  function setView(v) {
+    state.view = v;
+    if (v === "shiftplan") { /* bleibt */ }
+    if (v === "anmeldung") { /* */ }
+    if (v === "supervisor" && isSup()) { loadUsers().then(() => { loadAppsAll(); render(); }); return; }
+    if (v === "account") { loadProfile().then(() => render()); return; }
+    state.notifOpen = false;
     render();
   }
-}
 
-window.VBG = VBG;
-boot();
+  function setSuperTab(tab) {
+    state.superTab = tab;
+    if (tab === "users") { loadUsers().then(() => render()); return; }
+    if (tab === "anmeldungen") { loadAppsAll().then(() => render()); return; }
+    if (tab === "activity") { state.actAll = null; loadActivityAll().then((r) => { state.actAll = r; render(); }); return; }
+    render();
+  }
 
-window.addEventListener("vbg:logout", () => {
-  state.user = null;
-  render();
-});
+  async function loadAppsAll() {
+    try {
+      const q = new URLSearchParams();
+      if (state.appFilter.nutzer) q.set("nutzer", state.appFilter.nutzer);
+      if (state.appFilter.shift) q.set("shift", state.appFilter.shift);
+      const [apps, wishes] = await Promise.all([
+        api("GET", "/api/applications" + (q.toString() ? "?" + q.toString() : "")),
+        api("GET", "/api/wishes"),
+      ]);
+      state.appsAll = apps.applications || [];
+      state.wishesAll = wishes.wishes || [];
+    } catch (e) { state.appsAll = []; state.wishesAll = []; }
+  }
+
+  // ---- Shifts ----
+  function showShiftForm() {
+    renderShiftFormInline(null);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+  function hideShiftForm() {
+    const el = document.getElementById("shift-form");
+    if (el) el.innerHTML = "";
+  }
+  function editShift(id) {
+    const s = state.shifts.find((x) => x.id === id);
+    renderShiftFormInline(s);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+  function newShiftFromTpl() {
+    renderShiftFormInline(null);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    toast("Neue Shift anlegen – Dutys werden automatisch aus dem Tagesplan geladen.", "ok");
+  }
+  async function saveShift(id) {
+    const name = document.getElementById("sf-name").value.trim();
+    if (!name) { toast("Name fehlt", "err"); return; }
+    const hostId = document.getElementById("sf-host").value;
+    const coSupervisorIds = [];
+    document.querySelectorAll("[data-co]").forEach((c) => { if (c.checked) coSupervisorIds.push(c.value); });
+    const body = {
+      name,
+      date: document.getElementById("sf-date").value,
+      startTime: document.getElementById("sf-start").value,
+      endTime: document.getElementById("sf-end").value,
+      notes: document.getElementById("sf-notes").value,
+      hostId,
+      coSupervisorIds,
+    };
+    try {
+      if (id) {
+        await api("PATCH", "/api/shifts/" + id, body);
+        toast("Shift aktualisiert", "ok");
+      } else {
+        body.fromTemplate = document.getElementById("sf-tpl").checked;
+        const r = await api("POST", "/api/shifts", body);
+        toast(`Shift erstellt – ${r.copiedDuties || 0} Dutys automatisch geladen`, "ok");
+      }
+      hideShiftForm();
+      await refreshAll();
+      state.planShiftId = id || "";
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function deleteShift(id) {
+    if (!confirm("Shift wirklich löschen? Alle Dutys und Anmeldungen werden entfernt.")) return;
+    try { await api("DELETE", "/api/shifts/" + id); toast("Gelöscht", "ok"); await refreshAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Shiftplan ----
+  function selectPlanShift(id) {
+    state.planShiftId = id;
+    state.plan = null;
+    render();
+  }
+  function openPlan(id) { state.planShiftId = id; state.plan = null; setView("shiftplan"); }
+  function reloadFromTpl() {
+    // Dutys aus Tagesplan nachladen → Shift neu anlegen Variante: direkt auf die Shift laden
+    toast("Nutze „Neue Shift“ mit aktiviertem Tagesplan-Häkchen.", "");
+  }
+  function toggleStops(tripId) {
+    if (state.planExpandedStops[tripId]) delete state.planExpandedStops[tripId];
+    else state.planExpandedStops[tripId] = true;
+    render();
+  }
+  function toggleDutyStops(dutyId) {
+    if (state.expandedDuties[dutyId]) delete state.expandedDuties[dutyId];
+    else state.expandedDuties[dutyId] = true;
+    render();
+  }
+
+  async function assignDuty(dutyId, userId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId, { assignedUserId: userId || null });
+      toast(userId ? "Zuteilung (Duty) gesetzt" : "Zuteilung entfernt", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); await loadPlan(); render(); }
+  }
+  async function assignDutyVehicle(dutyId, vehicleId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId, { vehicleId: vehicleId || null });
+      toast("Fahrzeug gesetzt", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function saveDutyBemerk(dutyId) {
+    const bemerkung = document.getElementById("duty-bem-" + dutyId).value;
+    try { await api("PATCH", "/api/duties/" + dutyId, { bemerkung }); toast("Bemerkung gespeichert", "ok"); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  function editDutyTimes(dutyId) {
+    const d = state.plan.duties.find((x) => x.id === dutyId);
+    const s = prompt("Duty-Anfang (HH:MM), z. B. " + (d.startTime || "05:00"), d.startTime || "");
+    if (s === null) return;
+    const e = prompt("Duty-Ende (HH:MM), z. B. " + (d.endTime || "21:00"), d.endTime || "");
+    if (e === null) return;
+    api("PATCH", "/api/duties/" + dutyId, { startTime: s, endTime: e })
+      .then(() => { toast("Zeiten angepasst", "ok"); return loadPlan(); })
+      .then(() => render())
+      .catch((er) => toast(er.message, "err"));
+  }
+  async function toggleDutyCancel(dutyId) {
+    const d = state.plan.duties.find((x) => x.id === dutyId);
+    try {
+      await api("PATCH", "/api/duties/" + dutyId, { cancelled: !d.cancelled });
+      toast(d.cancelled ? "Duty wieder aktiv" : "Duty ausgefallen", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function deleteDuty(dutyId) {
+    if (!confirm("Löschen?")) return;
+    try { await api("DELETE", "/api/duties/" + dutyId); toast("Gelöscht", "ok"); await loadPlan(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  async function assignTrip(dutyId, tripId, userId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { assignedUserId: userId || null });
+      toast(userId ? "Einzelfahrt zugeteilt" : "Zuteilung entfernt", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); await loadPlan(); render(); }
+  }
+  async function assignTripVehicle(dutyId, tripId, vehicleId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { vehicleId: vehicleId || null });
+      toast("Fahrzeug gesetzt", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function toggleTripCancel(dutyId, tripId) {
+    const d = state.plan.duties.find((x) => x.id === dutyId);
+    const tr = (d.trips || []).find((x) => x.id === tripId);
+    try {
+      await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { cancelled: !tr.cancelled });
+      toast(tr.cancelled ? "Fahrt wieder aktiv" : "Fahrt ausgefallen (durchgestrichen)", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  function toggleTripEdit(dutyId, tripId) {
+    const d = state.plan.duties.find((x) => x.id === dutyId);
+    const tr = (d.trips || []).find((x) => x.id === tripId);
+    const from = prompt("Von (Haltestelle)", tr.from || "");
+    if (from === null) return;
+    const to = prompt("Nach (Haltestelle)", tr.to || "");
+    if (to === null) return;
+    const dep = prompt("Abfahrt (HH:MM)", tr.dep || "");
+    if (dep === null) return;
+    const arr = prompt("Ankunft (HH:MM)", tr.arr || "");
+    if (arr === null) return;
+    const bemerkung = prompt("Bemerkung (Fahrt)", tr.bemerkung || "");
+    if (bemerkung === null) return;
+    api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { from, to, dep, arr, bemerkung })
+      .then(() => { toast("Fahrt aktualisiert", "ok"); return loadPlan(); })
+      .then(() => render())
+      .catch((er) => toast(er.message, "err"));
+  }
+  function toggleStopCancel(dutyId, tripId, stopId) {
+    api("GET", "/api/duties/" + dutyId).then((r) => {
+      const tr = (r.duty.trips || []).find((x) => x.id === tripId);
+      const st = (tr.stops || []).find((x) => x.id === stopId);
+      return api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId + "/stops/" + stopId, { cancelled: !st.cancelled });
+    }).then(() => { toast("Halt aktualisiert", "ok"); return loadPlan(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+  function addStop(dutyId, tripId) {
+    const station = prompt("Haltestelle");
+    if (!station) return;
+    const arr = prompt("Ankunft (optional)", "") || "";
+    api("POST", "/api/duties/" + dutyId + "/trips/" + tripId + "/stops", { station, arr })
+      .then(() => { toast("Halt hinzugefügt", "ok"); return loadPlan(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+
+  // ---- Anmeldung ----
+  async function submitAnmeldung() {
+    const shiftId = document.getElementById("an-shift").value;
+    const von = document.getElementById("an-von").value;
+    const bis = document.getElementById("an-bis").value;
+    const art = state.anmeldungArt;
+    const standortId = art === "kundenservice" ? document.getElementById("an-standort").value : undefined;
+    const hinweis = document.getElementById("an-hinweis").value;
+    if (!shiftId || !von || !bis) { toast("Shift, Von und Bis ausfüllen", "err"); return; }
+    if ((state.user.strafstunden || 0) >= 3 && art === "bus") { toast("Ab 3 Strafstunden nur noch Kundenservice", "err"); return; }
+    try {
+      await api("POST", "/api/applications", { shiftId, von, bis, art, standortId: standortId || undefined, hinweis });
+      toast("Anmeldung erstellt", "ok");
+      await loadMyApps();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function withdrawApp(id) {
+    try { await api("DELETE", "/api/my/applications/" + id); toast("Zurückgezogen", "ok"); await loadMyApps(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Kundenservice im Shiftplan ----
+  function addStandort() {
+    const name = prompt("Neuer Kundenservice-Standort");
+    if (!name) return;
+    api("POST", "/api/kundenservice", { name })
+      .then(() => { toast("Standort angelegt", "ok"); return loadKundenservice(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+  function renameStandort(id) {
+    const k = KUNDENSERVICE_STATE.items.find((x) => x.id === id);
+    const name = prompt("Name", k ? k.name : "");
+    if (!name) return;
+    api("PATCH", "/api/kundenservice/" + id, { name })
+      .then(() => { toast("Umbenannt", "ok"); return loadKundenservice(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+  function delStandort(id) {
+    if (!confirm("Standort löschen?")) return;
+    api("DELETE", "/api/kundenservice/" + id)
+      .then(() => { toast("Gelöscht", "ok"); return loadKundenservice(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+  function kundenserviceSignup(id) {
+    if (!state.planShiftId) { toast("Erst eine Shift wählen", "err"); return; }
+    state.view = "anmeldung";
+    state.anmeldungArt = "kundenservice";
+    state.anmeldungShiftId = state.planShiftId;
+    render();
+    setTimeout(() => {
+      const sel = document.getElementById("an-standort");
+      if (sel) sel.value = id;
+      toast("Kundenservice-Anmeldung für diese Shift – mindestens 30 Minuten.", "ok");
+    }, 60);
+  }
+
+  // ---- Activity ----
+  async function signupActivity() {
+    try {
+      await api("POST", "/api/activity/signup", {});
+      toast("Für Activity angemeldet!", "ok");
+      const r = await loadActivityMe();
+      state.actMe = r;
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Supervisor: Nutzer ----
+  function showUserForm() {
+    const el = document.getElementById("user-form");
+    el.innerHTML = `
+      <div class="container">
+        <h2>Nutzer anlegen</h2>
+        <p class="muted">Ein Einmal-Passwort wird automatisch erzeugt. Nur Benutzername, Rolle und ggf. Lizenzen angeben.</p>
+        <div class="form-grid">
+          <label>Benutzername<input id="nu-name" placeholder="z. B. max_bus"/></label>
+          <label>Rolle<select id="nu-role">
+            <option value="user">Busfahrer</option>
+            <option value="senior">Senior Busfahrer</option>
+            <option value="supervisor">Supervisor</option>
+          </select></label>
+        </div>
+        <fieldset><legend>Lizenzen</legend>
+          ${state.cats.linien.map((l) => `<label class="checkline"><input type="checkbox" value="${l.id}"> ${h(l.name)} – ${h(l.beschreibung || "")}</label>`).join("")}
+        </fieldset>
+        <div class="flex" style="margin-top:8px">
+          <button class="btn btn-green" onclick="VBG.createUser()">Anlegen</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('user-form').innerHTML=''">Abbrechen</button>
+        </div>
+        <div id="user-pw-result"></div>
+      </div>`;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+  async function createUser() {
+    const username = document.getElementById("nu-name").value.trim();
+    const role = document.getElementById("nu-role").value;
+    const linien = [];
+    document.querySelectorAll("#user-form .checkline input:checked").forEach((c) => linien.push(c.value));
+    if (!username) { toast("Benutzername fehlt", "err"); return; }
+    try {
+      const r = await api("POST", "/api/users", { username, role, linien });
+      const box = document.getElementById("user-pw-result");
+      box.innerHTML = `
+        <div style="margin-top:12px;background:var(--panel2);border:1px solid var(--green);border-radius:8px;padding:14px">
+          <b style="color:var(--green)">Nutzer angelegt – Zugangsdaten (für Copy-Paste):</b>
+          <pre style="background:#0c1117;padding:10px;border-radius:6px;margin-top:8px;line-height:1.7">bn:   ${h(username)}
+pw:   ${h(r.einmalPasswort)}
+rolle: ${h(ROLE_LABELS[role] || role)}</pre>
+          <button class="btn btn-sm" onclick="VBG.copyPwResult()">In Zwischenablage kopieren</button>
+        </div>`;
+      toast("Nutzer angelegt", "ok");
+      await loadUsers();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  function copyPwResult() {
+    const pre = document.querySelector("#user-pw-result pre");
+    const text = pre ? pre.textContent : "";
+    navigator.clipboard && navigator.clipboard.writeText(text).then(() => toast("Kopiert", "ok")).catch(() => toast("Kopieren fehlgeschlagen", "err"));
+  }
+  function editUser(id) {
+    const u = state.users.find((x) => x.id === id);
+    const el = document.getElementById("user-form");
+    const robloxReadonly = u.robloxEditable === undefined ? false : !u.robloxEditable;
+    el.innerHTML = `
+      <div class="container">
+        <h2>Nutzer bearbeiten: ${h(u.username)}</h2>
+        <div class="form-grid">
+          <label>Rolle<select id="eu-role">
+            <option value="user" ${u.role === "user" ? "selected" : ""}>Busfahrer</option>
+            <option value="senior" ${u.role === "senior" ? "selected" : ""}>Senior Busfahrer</option>
+            <option value="supervisor" ${u.role === "supervisor" ? "selected" : ""}>Supervisor</option>
+          </select></label>
+          <label>Discord Name<input id="eu-discord" value="${h(u.discordName || "")}"/></label>
+          <label>Roblox Name<input id="eu-roblox" value="${h(u.robloxName || "")}" ${robloxReadonly && !u.protected ? "disabled" : ""}/>
+            <span class="muted" style="font-size:11px">${robloxReadonly ? "noch nicht abgelaufen (6 Monate)" : "änderbar"}</span>
+          </label>
+          <label>Sprache<select id="eu-lang"><option value="de" ${u.language !== "en" ? "selected" : ""}>Deutsch</option><option value="en" ${u.language === "en" ? "selected" : ""}>English</option></select></label>
+        </div>
+        <fieldset><legend>Lizenzen</legend>
+          ${state.cats.linien.map((l) => `<label class="checkline"><input type="checkbox" value="${l.id}" ${(u.linien || []).includes(l.id) ? "checked" : ""}> ${h(l.name)} – ${h(l.beschreibung || "")}</label>`).join("")}
+        </fieldset>
+        ${u.protected ? `<p class="muted">Geschützter Supervisor – Rolle/Lizenzen/Sperre werden hier nicht verändert.</p>` : ""}
+        <div class="flex" style="margin-top:8px">
+          <button class="btn btn-green" onclick="VBG.saveUserEdit('${u.id}')">Speichern</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('user-form').innerHTML=''">Abbrechen</button>
+        </div>
+      </div>`;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+  async function saveUserEdit(id) {
+    const body = {
+      role: document.getElementById("eu-role").value,
+      discordName: document.getElementById("eu-discord").value,
+      language: document.getElementById("eu-lang").value,
+    };
+    const rbx = document.getElementById("eu-roblox");
+    if (!rbx.disabled) body.robloxName = rbx.value;
+    if (!document.querySelector("#user-form .container .muted")) {
+      const linien = [];
+      document.querySelectorAll("#user-form .checkline input:checked").forEach((c) => linien.push(c.value));
+      body.linien = linien;
+    }
+    try {
+      await api("PATCH", "/api/users/" + id, body);
+      toast("Gespeichert", "ok");
+      document.getElementById("user-form").innerHTML = "";
+      await loadUsers();
+      setSuperTab("users");
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function strafe(id, delta) {
+    try {
+      const r = await api("POST", "/api/users/" + id + "/strafstunden", { delta });
+      toast("Strafstunden: " + r.user.strafstunden, "ok");
+      await loadUsers(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function resetPw(id) {
+    const u = state.users.find((x) => x.id === id);
+    const neu = prompt("Neues Passwort für " + u.username + " (leer = zufällig):", "");
+    if (neu === null) return;
+    if (neu === "") {
+      // Zufallspasswort über Backend-Set (server generiert kein reset; nutze einfaches lokal generiertes)
+      const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+      let pw = "";
+      for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+      await api("PATCH", "/api/users/" + id, { password: pw });
+      toast("Neues Passwort: " + pw, "ok");
+    } else {
+      await api("PATCH", "/api/users/" + id, { password: neu });
+      toast("Passwort gesetzt", "ok");
+    }
+    await loadUsers();
+  }
+  async function toggleSuspend(id) {
+    const u = state.users.find((x) => x.id === id);
+    try { await api("PATCH", "/api/users/" + id, { suspended: !u.suspended }); await loadUsers(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function deleteUser(id) {
+    if (!confirm("Nutzer wirklich löschen?")) return;
+    try { await api("DELETE", "/api/users/" + id); toast("Gelöscht", "ok"); await loadUsers(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Supervisor: Linien ----
+  function showLinieForm() {
+    const el = document.getElementById("linie-form");
+    el.innerHTML = `
+      <div class="container">
+        <h2>Neue Linie / Lizenz</h2>
+        <div class="form-grid">
+          <label>Name<input id="nl-name" placeholder="z. B. (SB) 24"/></label>
+          <label>Beschreibung<input id="nl-desc" placeholder="z. B. Schnellbus, Nachtbus, …"/></label>
+        </div>
+        <div class="flex" style="margin-top:8px">
+          <button class="btn btn-green" onclick="VBG.createLinie()">Anlegen</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('linie-form').innerHTML=''">Abbrechen</button>
+        </div>
+      </div>`;
+  }
+  async function createLinie() {
+    const name = document.getElementById("nl-name").value.trim();
+    const beschreibung = document.getElementById("nl-desc").value.trim();
+    if (!name) { toast("Name fehlt", "err"); return; }
+    try { await api("POST", "/api/linien", { name, beschreibung }); toast("Linie angelegt", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  function editLinie(id) {
+    const l = state.cats.linien.find((x) => x.id === id);
+    const el = document.getElementById("linie-form");
+    el.innerHTML = `
+      <div class="container">
+        <h2>Linie bearbeiten</h2>
+        <div class="form-grid">
+          <label>Name<input id="el-name" value="${h(l.name)}"/></label>
+          <label>Beschreibung<input id="el-desc" value="${h(l.beschreibung || "")}" placeholder="z. B. Schnellbus, Nachtbus"/></label>
+        </div>
+        <div class="flex" style="margin-top:8px">
+          <button class="btn btn-green" onclick="VBG.saveLinie('${l.id}')">Speichern</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('linie-form').innerHTML=''">Abbrechen</button>
+        </div>
+      </div>`;
+  }
+  async function saveLinie(id) {
+    const name = document.getElementById("el-name").value.trim();
+    const beschreibung = document.getElementById("el-desc").value.trim();
+    try { await api("PATCH", "/api/linien/" + id, { name, beschreibung }); toast("Gespeichert", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function delLinie(id) {
+    if (!confirm("Linie löschen? (Nutzern zugewiesene Lizenzen bleiben erhalten)") ) return;
+    try { await api("DELETE", "/api/linien/" + id); toast("Gelöscht", "ok"); await loadCats(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Supervisor: Anmeldungen ----
+  async function acceptApp(id) {
+    try { await api("POST", "/api/applications/" + id + "/accept"); toast("Angenommen", "ok"); await loadAppsAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function denyApp(id) {
+    try { await api("POST", "/api/applications/" + id + "/deny"); toast("Abgelehnt", "ok"); await loadAppsAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function delApp(id) {
+    try { await api("DELETE", "/api/applications/" + id); toast("Entfernt", "ok"); await loadAppsAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function acceptWish(id) {
+    try { await api("POST", "/api/wishes/" + id + "/accept"); toast("Zugeteilt", "ok"); await loadAppsAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+  async function denyWish(id) {
+    try { await api("POST", "/api/wishes/" + id + "/deny"); toast("Abgelehnt", "ok"); await loadAppsAll(); render(); }
+    catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Nachrichten ----
+  function openAnnounce() { openAnnounceModal(); }
+  async function sendAnnounce() {
+    const text = document.getElementById("ann-text").value.trim();
+    if (!text) { toast("Text fehlt", "err"); return; }
+    const zielgruppe = [];
+    document.querySelectorAll(".modal-backdrop [type=checkbox][value]").forEach((c) => { if (c.checked) zielgruppe.push(c.value); });
+    if (!zielgruppe.length) { toast("Zielgruppe wählen", "err"); return; }
+    const dringend = document.getElementById("ann-dringend").checked;
+    try {
+      await api("POST", "/api/announcements", { text, zielgruppe, dringend });
+      toast("Nachricht gesendet", "ok");
+      document.querySelector(".modal-backdrop").remove();
+      setTimeout(checkAnnouncements, 500);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  // ---- Notifications ----
+  async function readNotif(id, ev) {
+    if (ev) ev.stopPropagation();
+    try { await api("POST", "/api/notifications/" + id + "/read", {}); markSeenAllLocal(); renderNotifDrop(); }
+    catch (e) {}
+  }
+  async function readAllNotifs(ev) {
+    if (ev) ev.stopPropagation();
+    try { await api("POST", "/api/notifications/read-all", {}); markSeenAllLocal(); loadNotifs(); renderNotifDrop(); }
+    catch (e) {}
+  }
+
+  // ---- Account ----
+  async function loadProfile() {
+    try { state.profile = await api("GET", "/api/me/profile"); state.user = { ...state.user, ...state.profile.user }; }
+    catch (e) {}
+  }
+  async function saveProfile() {
+    const discordName = document.getElementById("acc-discord").value.trim();
+    const robloxName = document.getElementById("acc-roblox").value.trim();
+    const language = document.getElementById("acc-lang").value;
+    const body = { discordName, language };
+    const rbx = document.getElementById("acc-roblox");
+    if (!rbx.disabled) body.robloxName = robloxName;
+    try {
+      await api("PATCH", "/api/me/profile", body);
+      toast("Profil gespeichert", "ok");
+      document.documentElement.lang = language === "en" ? "en" : "de";
+      state.user.language = language;
+      await loadProfile();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function toggleDesktop() {
+    if (desktopEnabled()) {
+      localStorage.removeItem(DESKTOP_KEY);
+      toast("Desktop-Benachrichtigungen deaktiviert", "ok");
+      render();
+      return;
+    }
+    if (!("Notification" in window)) { toast("Dieser Browser unterstützt keine Desktop-Benachrichtigungen", "err"); return; }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      localStorage.setItem(DESKTOP_KEY, "1");
+      toast("Desktop-Benachrichtigungen aktiv", "ok");
+    } else toast("Berechtigung nicht erteilt", "err");
+    render();
+  }
+
+  // ---- Inline-Handler-Helfer (für onchange etc.) ----
+  function setAnmeldungShift(v) { state.anmeldungShiftId = v; }
+  function setAnmeldungArt(v) { state.anmeldungArt = v; render(); }
+  function setActivityRange(v) { state.activityRange = v; state.actAll = null; render(); }
+  function setAppFilterNutzer(v) { state.appFilter.nutzer = v; state.appsAll = null; render(); }
+  function setAppFilterShift(v) { state.appFilter.shift = v; state.appsAll = null; render(); }
+  function resetAppFilter() { state.appFilter = { nutzer: "", shift: "" }; state.appsAll = null; render(); }
+
+  // ---- Outro ----
+  function doLogout() {
+    try { api("POST", "/api/auth/logout"); } catch (e) {}
+    Auth.clear();
+    state.user = null;
+    state.plan = null;
+    state.myApps = [];
+    state.notifications = [];
+    render();
+  }
+
+  // ---------- Polling ----------
+  let pollTimer = null;
+  function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      if (!state.user) return;
+      await loadNotifs();
+      await checkAnnouncements();
+      if (state.view === "shiftplan" && state.planShiftId) await loadPlan();
+      if (state.view === "account") await loadProfile();
+      if (state.view === "supervisor" && state.superTab === "anmeldungen") await loadAppsAll();
+      const main = document.querySelector("main");
+      if (main) main.innerHTML = renderView();
+    }, 20000);
+  }
+
+  // ---------- Init ----------
+  async function init() {
+    const token = Auth.getToken();
+    if (!token) { render(); return; }
+    try {
+      const me = await api("GET", "/api/auth/me");
+      state.user = me.user;
+      document.documentElement.lang = (state.user.language === "en") ? "en" : "de";
+      await bootstrapAfterLogin();
+      render();
+    } catch (e) {
+      Auth.clear();
+      render();
+    }
+  }
+
+  window.VBG = {
+    setView, setSuperTab, doLogin, doLogout,
+    setAnmeldungShift, setAnmeldungArt, setActivityRange,
+    setAppFilterNutzer, setAppFilterShift, resetAppFilter,
+    toggleNotif, readNotif, readAllNotifs,
+    openAnnounce, sendAnnounce, markAnnounceSeen,
+    showShiftForm, hideShiftForm, editShift, newShiftFromTpl, saveShift, deleteShift,
+    selectPlanShift, openPlan, reloadFromTpl, toggleStops, toggleDutyStops,
+    assignDuty, assignDutyVehicle, saveDutyBemerk, editDutyTimes, toggleDutyCancel, deleteDuty,
+    assignTrip, assignTripVehicle, toggleTripCancel, toggleTripEdit, toggleStopCancel, addStop,
+    submitAnmeldung, withdrawApp,
+    addStandort, renameStandort, delStandort, kundenserviceSignup,
+    signupActivity,
+    showUserForm, createUser, copyPwResult, editUser, saveUserEdit, strafe, resetPw, toggleSuspend, deleteUser,
+    showLinieForm, createLinie, editLinie, saveLinie, delLinie,
+    acceptApp, denyApp, delApp, acceptWish, denyWish,
+    saveProfile, toggleDesktop,
+  };
+
+  init();
+})();

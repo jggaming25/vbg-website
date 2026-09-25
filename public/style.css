@@ -282,6 +282,85 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .warn-hot { background: rgba(248,113,113,.07); }
 .warn-hot td { border-bottom-color: rgba(248,113,113,.3); }
 
+/* ---------- Shiftplan-Listen ---------- */
+.pause-row td { background: rgba(56,189,248,.04); }
+.pause-label { font-size: 12px; font-weight: 600; }
+.cancelled-row { opacity: .55; }
+.leer-row td { background: rgba(147,163,180,.07); }
+.leer-row { color: var(--muted); }
+.stop-box { margin: 6px 0 0; }
+
+/* ---------- Announcements & Dringend-Overlay ---------- */
+.announce-banner {
+  position: sticky;
+  top: 56px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--accent);
+  max-width: 1100px;
+  margin: 0 auto;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.announce-banner svg { flex: none; color: var(--accent); }
+.announce-banner span { flex: 1; }
+.announce-banner .btn { flex: none; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 10, 15, .72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 20px;
+}
+.modal {
+  width: 460px;
+  max-width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.5);
+}
+.modal h2 { margin: 0 0 14px; font-size: 17px; }
+.modal textarea { width: 100%; margin-top: 6px; }
+
+.urgent-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(80, 8, 8, .55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+  padding: 20px;
+}
+.urgent-card {
+  width: 380px;
+  max-width: 100%;
+  background: #2a0f12;
+  border: 2px solid var(--red);
+  border-radius: 14px;
+  padding: 24px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(248,113,113,.35);
+  animation: urgentPulse 1.2s ease-in-out infinite;
+}
+.urgent-card h2 { color: var(--red); margin: 10px 0 8px; }
+.urgent-card p { margin: 6px 0; }
+.urgent-card .btn { width: 100%; margin-top: 16px; }
+@keyframes urgentPulse { 50% { box-shadow: 0 0 70px rgba(248,113,113,.6); } }
+
 @media (max-width: 700px) {
   .notif-drop { width: 300px; right: -120px; }
   .userbox .name { display: none; }

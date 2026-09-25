@@ -204,17 +204,23 @@ Pages (Frontend)**.
 4. **Planung:** Die kopierte Shift öffnen → Dutys einzelnen Fahrern zuweisen
    (nur Fahrer mit passender **Linien-Lizenz**; Auswahl zeigt die Kandidaten).
    Fahrten entfallen lassen (mit Vermerk), Halte streichen, Fahrzeug ändern.
-5. **Anmeldungen:** Fahrer klicken in der Shift auf **„Für diese Shift
-   anmelden"** (mit Nachricht) → du nimmst unter **Supervisor → Anmeldungen**
-   an/ab und teilst die Dutys danach manuell zu. Dutys können Fahrer zusätzlich
-   **wünschen** (nur mit passender Lizenz) → Untertab **Wünsche**.
+5. **Anmeldungen:** Fahrer wählen unter **Anmeldung** eine Shift + Zeitfenster
+   (Busfahren min. 75 min oder **Kundenservice** min. 30 min) – du nimmst unter
+   **Supervisor → Anmeldungen** an/ab und teilst die Dutys danach manuell zu.
+   Pro Person und Shift gibt es nur **eine** Funktion; **ab 3 Strafstunden** ist
+   nur noch Kundenservice erlaubt. Dutys können Fahrer zusätzlich **wünschen**
+   (nur mit passender Lizenz).
 6. **Fahrzeugübersicht:** Für alle Rollen sichtbar (Kennzeichen, Standort,
    Einsatzstatus, geplante Dutys). Den **Fahrzeugstatus** (einsatzbereit /
    nicht einsatzbereit / Sonderfahrzeug / Ersatzwagen / Fahrschule / Reserve)
    darf nur der Supervisor ändern.
-7. **Warnungen:** Unter **Supervisor → Warnungen** Warnungen mit Stundenzahl
-   + Frist erfassen; **ab 3 Stunden muss abgearbeitet werden** – Fortschritt
-   durch „+0,5"/„+1" pflegen, abschließen wenn erledigt.
+7. **Strafstunden:** Unter **Supervisor → Nutzer** pro Fahrer Strafstunden
+   vergeben („+0,5"/„+1"/„-1"/„-0,5"). **Ab 20 Strafstunden** droht die
+   Kündigung (rot markiert); **ab 3** sind nur noch Kundenservice-Anmeldungen
+   möglich.
+8. **Nachrichten:** Supervisor kann über das Icon oben rechts eine Nachricht an
+   Busfahrer/Senioren/Supervisoren senden – mit **Dringend**-Häkchen erscheint
+   zusätzlich ein rotes Overlay mit 10-Sekunden-Sperre und Warnton.
 
 ---
 

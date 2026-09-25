@@ -2,8 +2,10 @@
 
 Organisationstool für den **Busbetrieb VBG**:
 Shifts mit Dutys (Fahrten + Halte), **linienbasierte Lizenzen** (19, (SB) 24, 8, N1),
-Shift-Anmeldungen mit manueller Zuteilung, Wunsch-System, Warn-System und
-Fahrzeugübersicht mit supervisor-gesteuertem Status.
+**Shiftplan** mit Zuteilung (Dutys + Einzelfahrten), Shift-Anmeldungen mit von–bis-Zeiten,
+**Strafstunden-System**, Activity/Anwesenheit, Kundenservice-Anmeldungen,
+Supervisor-Nachrichten (auch dringend) und Fahrzeugübersicht mit
+supervisor-gesteuertem Status.
 
 ## Tech-Stack
 
@@ -26,19 +28,39 @@ Fahrzeugübersicht mit supervisor-gesteuertem Status.
   Per Klick „Als Shift übernehmen" wird er für einen Wochentag kopiert.
 - **Linienwechsel** sind als Hinweis an Dutys hinterlegt (z.B. „Umlauf kann am
   GVZ auf Linie 19 wechseln").
-- **Shifts mit von–bis-Uhrzeit** (Start/Ende), Dutys je Shift.
-- **Shift-Anmeldungen:** Fahrer melden sich mit einer Nachricht an → Supervisor
-  nimmt an/ab und teilt danach manuell Dutys zu (mit Lizenzprüfung).
+- **Shifts mit von–bis-Uhrzeit** (Start/Ende), Dutys je Shift. Neue Shifts werden
+  per Häkchen automatisch aus dem Tagesplan befüllt.
+- **Shiftplan:** pro Shift eine Planansicht mit Dutys (Kurs, Fahrzeiten, Pausen,
+  Leerfahrten als erste/letzte Fahrt, Haltestellen). Supervisor vergibt **Host +
+  bis zu 2 Co-Supervisoren**, teilt Dutys und Einzelfahrten zu (mit Fahrzeugwahl)
+  und kann Zeiten, Haltestellen und Ausfälle verwalten; **Konfliktprüfung**
+  verhindert zeitliche Überschneidungen.
+- **Shift-Anmeldungen mit von–bis-Zeiten:** Busfahren (min. 75 min) oder
+  **Kundenservice** (min. 30 min, Standort wählbar) – pro Person und Shift nur
+  eine Funktion. **Ab 3 Strafstunden** ist nur noch Kundenservice erlaubt.
+  Supervisor nimmt an/ab und teilt danach manuell Dutys zu (mit Lizenzprüfung).
 - **Duty-Wünsche** nur bei passender Linien-Lizenz; Supervisor nimmt an/ab.
+- **Strafstunden-System:** Warnungen als Strafstunden + Frist. **Ab 20 ist die
+  Kündigung gefährdet** (rot markiert, „Kündigung droht"), ab 3 nur noch
+  Kundenservice. Fortschritt wird supervisorseitig gepflegt.
+- **Activity/Anwesenheit:** Fahrer melden sich ein/aus; Activity = **60 % der
+  reinen Fahrzeit**. Übersicht pro Nutzer (Zeitraum Woche/Monat/Jahr/Alle) und
+  über alle Nutzer.
+- **Supervisor-Nachrichten:** an Busfahrer/Senioren/Supervisoren, optional
+  **dringend** (= rotes Overlay mit 10 s-Sperre + Warnton + Banner).
 - **Fahrzeugübersicht für alle Rollen**: Wagennummer, Kennzeichen, Typ, Standort,
   Einsatzstatus (kein Einsatz / eingeplant / im Einsatz), geplante Dutys.
   Der **Status** (einsatzbereit / nicht einsatzbereit / Sonderfahrzeug /
   Ersatzwagen / Fahrschule / Reserve) ist **nur durch den Supervisor** änderbar.
-- **Warn-System:** Warnungen mit Stundenzahl + Frist; **ab 3 Stunden muss
-  abgearbeitet werden** (Fortschritt wird gepflegt).
-- **Supervisor-Bereich mit Untertabs:** Nutzer · Linien & Lizenzen · Wünsche ·
-  Anmeldungen · Warnungen.
-- **Benachrichtigungen:** In-App-Box + Desktop (Polling alle 30 s).
+- **Strafstunden-System** (siehe oben): Warnungen mit Stundenzahl + Frist werden
+  supervisorseitig gepflegt.
+- **Supervisor-Bereich mit Untertabs:** Nutzer · Linien & Lizenzen · Anmeldungen ·
+  Activity.
+- **Benachrichtigungen:** In-App-Box + Desktop-Toggle (Polling alle 20 s).
+- **Gerätesperre:** läuft nur auf Windows-/Linux-PCs, Surfaces und Laptops –
+  Konsolen und Handys werden blockiert.
+- **Account:** Sprache (DE/EN), Discord, Roblox-Name mit 6-Monats-Sperre nach
+  Änderung, Zuteilungen.
 
 ## Lokal starten
 

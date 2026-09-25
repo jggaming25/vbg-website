@@ -111,24 +111,80 @@ function tripStops(key, baseH, baseM) {
   });
 }
 
-// Baut eine Fahr = Duty-internen Trip
-function makeTrip(vehicleId, line, kurs, from, to, depH, depM, stopKey) {
+// Baut eine Fahr = Duty-internen Trip (Fahrzeug wird NICHT zugewiesen – das
+// macht der Supervisor später manuell im Shiftplan).
+function makeTrip(line, kurs, from, to, depH, depM, stopKey, opts) {
   const dep = fmtHM(depH, depM);
   const arr = fmtHM(depH, depM + STOPS[stopKey][STOPS[stopKey].length - 1][1]);
   return {
-    id: uid(), from, to, dep, arr, vehicleId, cancelled: false, cancelNote: "",
-    zugNr: "", stops: tripStops(stopKey, depH, depM),
+    id: uid(), from, to, dep, arr,
+    vehicleId: null,
+    assignedUserId: null,
+    bemerkung: (opts && opts.bemerkung) || "",
+    leerfahrt: !!(opts && opts.leerfahrt),
+    cancelled: false, cancelNote: "",
+    zugNr: "", stops: (opts && opts.leerfahrt) ? [] : tripStops(stopKey, depH, depM),
   };
 }
 
+// Liest die Leerfahrt-Fahrzeit aus dem Fahrplan: Offset der Betriebshof-Haltestelle
+// innerhalb der Kurs-Route (= Zeit Hof ↔ erste/letzte Haltestelle laut Referenz-Sheet).
+function hofMin(stopKey) {
+  const stops = STOPS[stopKey] || [];
+  const bh = stops.find(([st]) => /Betriebshof/i.test(st));
+  return bh ? bh[1] : 10;
+}
+
 // Führt wiederkehrende Kurse stundenweise durch und hängt Trips in eine Duty
-function repeatCourse(duty, vehicleId, planRun) {
+function repeatCourse(duty, planRun) {
   // planRun: {hours:{from,to}, plan:[{line,kurs,from,to,depMin,stopKey,sonder?}]}
   const hrs = planRun.hours || { from: 5, to: 22 };
   for (let h = hrs.from; h < hrs.to; h++) {
-    for (const t of planRun.plan) {
-      duty.trips.push(makeTrip(vehicleId, t.line, t.kurs, t.from, t.to, h, t.depMin, t.stopKey));
+    for (let i = 0; i < planRun.plan.length; i++) {
+      const t = planRun.plan[i];
+      // Umlauf-Turn: startet der Eintrag "vor" seinem Vorgänger (z. B. Rückfahrt
+      // :00 nach Hinweg :30), gehört er in die Folgestunde – sonst lägen die Zeiten
+      // rückwärts (05:30 → 05:00). Turn = +1 Stunde ab dem Zurücksprung.
+      const dH = i > 0 && t.depMin < planRun.plan[i - 1].depMin ? h + 1 : h;
+      duty.trips.push(makeTrip(t.line, t.kurs, t.from, t.to, dH, t.depMin, t.stopKey));
     }
+  }
+}
+
+// Hängt eine Leerfahrt (Hof → erste Haltestelle bzw. letzte Haltestelle → Hof) an.
+// Zeit ergibt sich aus den Fahrplanzeiten: hofMin Minuten laut Route.
+function addLeerfahrt(duty, hin) {
+  const t0 = duty.trips[0];
+  const tl = duty.trips[duty.trips.length - 1];
+  if (!t0 || !tl) return;
+  if (hin && t0.dep) {
+    const [h, m] = t0.dep.split(":").map(Number);
+    const min = Math.max(1, hofMin(duty._firstStopKey));
+    const hh = fmtHM(h, m - min);
+    duty.trips.unshift({
+      id: uid(),
+      from: "Hof (Betriebshof Neuenburg)",
+      to: t0.from,
+      dep: hh, arr: t0.dep,
+      vehicleId: null, assignedUserId: null,
+      bemerkung: "Leerfahrt zum Einsatzbeginn",
+      leerfahrt: true,
+      cancelled: false, cancelNote: "", zugNr: "", stops: [],
+    });
+  } else if (!hin && tl.arr) {
+    const [h, m] = tl.arr.split(":").map(Number);
+    const min = Math.max(1, hofMin(duty._lastStopKey));
+    const hh = fmtHM(h, m + min);
+    duty.trips.push({
+      id: uid(),
+      from: tl.to,
+      to: "Hof (Betriebshof Neuenburg)",
+      dep: tl.arr, arr: hh,
+      vehicleId: null, assignedUserId: null,
+      bemerkung: "Leerfahrt zurück zum Hof",
+      leerfahrt: true,
+      cancelled: false, cancelNote: "", zugNr: "", stops: [],
+    });
   }
 }
 
@@ -226,15 +282,21 @@ function buildDuties(shiftId) {
       id: uid(), shiftId,
       linieId: lineId, kurs: course.kurs,
       name: course.kurs,
-      vehicleId: FZ_BY_WAGEN[course.fz] || null,
+      vehicleId: null,
       startTime: "", endTime: "",
       notes: planRun.notes || "",
+      bemerkung: "",
       linienwechsel: planRun.wechsel || "",
       cancelled: false, cancelNote: "", assignedUserId: null, trips: [], createdAt: "",
     };
-    repeatCourse(duty, duty.vehicleId, planRun);
+    duty._firstStopKey = planRun.plan[0].stopKey;
+    duty._lastStopKey = planRun.plan[planRun.plan.length - 1].stopKey;
+    repeatCourse(duty, planRun);
     const hasSonder = planRun.plan.some((t) => t.sonder);
     if (duty.trips.length) {
+      // Leerfahrten: Hof → erste Haltestelle (nachts analog), letzte Haltestelle → Hof
+      addLeerfahrt(duty, true);
+      addLeerfahrt(duty, false);
       duty.startTime = duty.trips[0].dep;
       duty.endTime = duty.trips[duty.trips.length - 1].arr;
     }
