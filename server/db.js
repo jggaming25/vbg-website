@@ -74,6 +74,7 @@ function ensureProtectedSupervisor() {
       suspended: false,
       protected: true,
       createdAt: new Date().toISOString(),
+      mustChangePassword: false,
     };
     db.users.push(u);
     save();
@@ -183,6 +184,7 @@ function shapeAndMigrate(db) {
     }
     if (typeof u.language !== "string") u.language = "de";
     if (typeof u.avatar !== "string") u.avatar = "";
+    if (u.mustChangePassword === undefined) u.mustChangePassword = false;
     delete u.fdl;
     delete u.tf;
     delete u.warns;

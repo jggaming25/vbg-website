@@ -112,6 +112,7 @@ function publicUser(u) {
     avatar: u.avatar || "",
     suspended: !!u.suspended,
     protected: !!u.protected,
+    mustChangePassword: !!u.mustChangePassword,
     createdAt: u.createdAt,
   };
 }
@@ -645,6 +646,7 @@ app.post("/api/users", async (req, res) => {
     language: "de",
     avatar: "",
     suspended: false,
+    mustChangePassword: true,
     createdAt: new Date().toISOString(),
   };
   data.users.push(user);
@@ -683,6 +685,27 @@ app.patch("/api/me/profile", requireAuth, async (req, res) => {
   }
   db.save();
   res.json({ user: publicUser(u), robloxEditable: canEditRoblox(u), robloxChangedAt: u.robloxChangedAt, displayNameEditable: canEditDisplayName(u), displayNameChangedAt: u.displayNameChangedAt });
+});
+
+app.post("/api/me/password", requireAuth, async (req, res) => {
+  const data = db.load();
+  const u = data.users.find((x) => x.id === req.user.id);
+  if (!u) return res.status(404).json({ error: "Nutzer nicht gefunden" });
+  const { currentPassword, newPassword } = req.body || {};
+  const np = String(newPassword || "");
+  if (np.length < 6) return res.status(400).json({ error: "Neues Passwort: mindestens 6 Zeichen" });
+  // Beim ersten Login mit Einmalpasswort (mustChangePassword) genügt das neue Passwort allein.
+  if (!u.mustChangePassword) {
+    if (!(await bcrypt.compare(String(currentPassword || ""), u.passwordHash || ""))) {
+      return res.status(400).json({ error: "Aktuelles Passwort ist falsch" });
+    }
+  }
+  u.passwordHash = await bcrypt.hash(np, 10);
+  u.mustChangePassword = false;
+  u.passwordChangedAt = new Date().toISOString();
+  audit(data, req.user, "Passwort geändert", u.username);
+  db.save();
+  res.json({ ok: true, mustChangePassword: false });
 });
 
 app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => {

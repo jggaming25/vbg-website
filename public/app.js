@@ -341,11 +341,44 @@
   function render() {
     const app = document.getElementById("app");
     if (!state.user) { app.innerHTML = renderLogin(); return; }
+    if (state.user.mustChangePassword && !state.forcePwDone) { app.innerHTML = renderForcePasswordChange(); return; }
     app.innerHTML = `
       ${renderTopbar()}
       <div id="announce-banner"></div>
       <main>${renderView()}</main>`;
     renderTopbarBadge();
+  }
+
+  function renderForcePasswordChange() {
+    return `
+    <div class="login-wrap">
+      <div class="login-card">
+        <h1>VBG <span style="color:var(--accent)">Organisation</span></h1>
+        <p class="sub">Du bist mit einem Einmalpasswort angemeldet – leg jetzt dein eigenes Passwort fest.</p>
+        <div>
+          <label>Neues Passwort</label>
+          <input id="fpw1" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')VBG.doFirstPasswordChange()"/>
+          <label>Neues Passwort (Wiederholung)</label>
+          <input id="fpw2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')VBG.doFirstPasswordChange()"/>
+          <button class="btn" onclick="VBG.doFirstPasswordChange()">Passwort festlegen</button>
+          <div id="login-error" class="login-error"></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  async function doFirstPasswordChange() {
+    const p = document.getElementById("fpw1").value;
+    const p2 = document.getElementById("fpw2").value;
+    if (p.length < 6) { toast("Neues Passwort: mindestens 6 Zeichen", "err"); return; }
+    if (p !== p2) { toast("Passwörter stimmen nicht überein", "err"); return; }
+    try {
+      await api("POST", "/api/me/password", { newPassword: p });
+      state.user = { ...state.user, mustChangePassword: false };
+      state.forcePwDone = true;
+      toast("Passwort gesetzt – willkommen!", "ok");
+      await bootstrapAfterLogin();
+    } catch (e) { toast(e.message, "err"); }
   }
 
   function renderLogin() {
@@ -1466,6 +1499,19 @@
       </div>
 
       <div class="container">
+        <h2>Passwort ändern</h2>
+        <div class="form-grid">
+          <label>Aktuelles Passwort<input id="pw-cur" type="password" autocomplete="current-password"/></label>
+          <label>Neues Passwort<input id="pw-new" type="password" autocomplete="new-password"/></label>
+          <label>Neues Passwort (Wiederholung)<input id="pw-new2" type="password" autocomplete="new-password"/></label>
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn" onclick="VBG.doChangePassword()">Passwort ändern</button>
+          <span class="muted" style="margin-left:8px">Mindestens 6 Zeichen.</span>
+        </div>
+      </div>
+
+      <div class="container">
         <h2>Eigene Lizenzen</h2>
         ${prof && prof.linien && prof.linien.length ? `
           ${prof.linien.map((l) => `<span class="badge ${linieClsId(l.id)}" style="margin:0 8px 8px 0">${h(l.name)} – ${h(l.beschreibung || "")}</span>`).join("")}`
@@ -2338,6 +2384,18 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     try { state.profile = await api("GET", "/api/me/profile"); state.user = { ...state.user, ...state.profile.user }; }
     catch (e) {}
   }
+  async function doChangePassword() {
+    const cur = document.getElementById("pw-cur") ? document.getElementById("pw-cur").value : "";
+    const p = document.getElementById("pw-new").value;
+    const p2 = document.getElementById("pw-new2").value;
+    if (p.length < 6) { toast("Neues Passwort: mindestens 6 Zeichen", "err"); return; }
+    if (p !== p2) { toast("Passwörter stimmen nicht überein", "err"); return; }
+    try {
+      await api("POST", "/api/me/password", { currentPassword: cur, newPassword: p });
+      toast("Passwort geändert", "ok");
+      ["pw-cur", "pw-new", "pw-new2"].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
+    } catch (e) { toast(e.message, "err"); }
+  }
   async function saveProfile() {
     const discordName = document.getElementById("acc-discord").value.trim();
     const robloxName = document.getElementById("acc-roblox").value.trim();
@@ -2463,7 +2521,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   }
 
   window.VBG = {
-    setView, setSuperTab, doLogin, doLogout,
+    setView, setSuperTab, doLogin, doLogout, doFirstPasswordChange, doChangePassword,
     setAnmeldungShift, setAnmeldungArt, setAnmeldungStandort, setActivityRange,
     setAppFilterNutzer, setAppFilterShift, resetAppFilter,
     toggleNotif, readNotif, readAllNotifs,
