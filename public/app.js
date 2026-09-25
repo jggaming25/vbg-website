@@ -224,6 +224,7 @@
     // Anmeldung
     anmeldungShiftId: "",
     anmeldungArt: "bus",
+    anmeldungStandortId: "",
     // Activity
     actMe: null,
     actAll: null,
@@ -612,9 +613,7 @@
                   <button class="btn btn-danger btn-xs" onclick="VBG.delStandort('${k.id}')">×</button>
                 </span>` : ""}
               </div>
-              <div style="margin-top:8px">
-                <button class="btn btn-sm" onclick="VBG.kundenserviceSignup('${k.id}')">Dafür anmelden</button>
-              </div>
+              <div class="muted" style="font-size:12px;margin-top:6px">Anmeldung im Tab „Anmeldung“ → Art <b>Kundenservice</b></div>
             </div>`).join("")}
           </div>`}
         <div id="standort-form"></div>
@@ -781,10 +780,19 @@
     catch (e) { KUNDENSERVICE_STATE.items = []; }
   }
 
+  function defaultStandortId() {
+    const items = KUNDENSERVICE_STATE.items || [];
+    if (!items.length) return "";
+    const gravenberg = items.find((k) => (k.name || "").toLowerCase().indexOf("kundencenter gravenberg") >= 0);
+    return gravenberg ? gravenberg.id : items[0].id;
+  }
+
   function renderAnmeldung() {
     const shiftsReal = realShifts();
     const u = state.user;
     const gesperrtBus = (u.strafstunden || 0) >= 3;
+    const standortDefault = defaultStandortId();
+    const standortSel = state.anmeldungStandortId || standortDefault;
 
     const einzelne = (state.myApps || []).find((a) => a.status === "pending") ? "" : "";
     return `
@@ -800,9 +808,9 @@
             <option value="bus" ${state.anmeldungArt !== "kundenservice" ? "selected" : ""}>Busfahren</option>
             <option value="kundenservice" ${state.anmeldungArt === "kundenservice" ? "selected" : ""}>Kundenservice</option>
           </select></label>
-          ${state.anmeldungArt === "kundenservice" ? `<label>Standort<select id="an-standort">
+          ${state.anmeldungArt === "kundenservice" ? `<label>Standort<select id="an-standort" onchange="VBG.setAnmeldungStandort(this.value)">
             <option value="">— wählen —</option>
-            ${KUNDENSERVICE_STATE.items.map((k) => `<option value="${k.id}">${h(k.name)}</option>`).join("")}
+            ${KUNDENSERVICE_STATE.items.map((k) => `<option value="${k.id}" ${standortSel === k.id ? "selected" : ""}>${h(k.name)}</option>`).join("")}
           </select></label>` : ""}
           <label>Von (Uhrzeit)<input id="an-von" type="time"/></label>
           <label>Bis (Uhrzeit)<input id="an-bis" type="time"/></label>
@@ -1118,8 +1126,81 @@
 
   // ---------- Account ----------
   const DESKTOP_KEY = "vbg_desktop_notif";
-  function desktopEnabled() { return localStorage.getItem(DESKTOP_KEY) === "1"; }
+  function desktopEnabled() { return localStorage.getItem(DESKTOP_KEY) !== "0"; }
   let pendingAvatar = null;
+
+  // ---------- System-/Desktop-Benachrichtigungen (Web Push) ----------
+  let pushActive = false;
+  function pushSupported() {
+    return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  }
+  function urlBase64ToUint8Array(b64) {
+    const bin = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
+    const u = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+  function arrayBufToB64(ab) {
+    if (!ab) return "";
+    return btoa(String.fromCharCode.apply(null, new Uint8Array(ab)));
+  }
+  async function getVapidPublicKey() {
+    try {
+      const r = await api("GET", "/api/push/vapid");
+      return r && r.publicKey ? r.publicKey : null;
+    } catch (e) { return null; }
+  }
+  async function pushSubscribe() {
+    if (!pushSupported()) return false;
+    if (Notification.permission !== "granted") {
+      const p = await Notification.requestPermission();
+      if (p !== "granted") return false;
+    }
+    const reg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
+    await navigator.serviceWorker.ready;
+    const pub = await getVapidPublicKey();
+    if (!pub) return false;
+    const pm = reg.pushManager;
+    let sub = await pm.getSubscription();
+    if (!sub) {
+      sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pub) });
+    }
+    if (!sub) return false;
+    await api("POST", "/api/push/register", {
+      endpoint: sub.endpoint,
+      auth: arrayBufToB64(sub.getKey("auth")),
+      p256dh: arrayBufToB64(sub.getKey("p256dh")),
+      ua: navigator.userAgent,
+    });
+    pushActive = true;
+    return true;
+  }
+  async function pushUnsubscribe() {
+    pushActive = false;
+    if (!("serviceWorker" in navigator)) return;
+    let endpoint = null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) { endpoint = sub.endpoint; await sub.unsubscribe(); }
+    } catch (e) {}
+    try { await api("POST", "/api/push/unregister", { endpoint }); } catch (e) {}
+  }
+  async function tryEnablePush() {
+    if (!desktopEnabled() || !pushSupported()) return;
+    try { await pushSubscribe(); } catch (e) { /* z. B. kein Netz / Berechtigung noch offen */ }
+  }
+  async function setPushEnabled(on) {
+    if (on) {
+      const ok = await pushSubscribe();
+      if (!ok) { toast("Desktop-Benachrichtigungen nicht aktiviert (Berechtigung fehlt?)", "err"); return false; }
+      toast("Desktop-Benachrichtigungen aktiviert – auch wenn die Seite zu ist.", "ok");
+      return true;
+    }
+    await pushUnsubscribe();
+    toast("Desktop-Benachrichtigungen deaktiviert.", "");
+    return true;
+  }
 
   function renderAccount() {
     const u = state.user;
@@ -1216,7 +1297,7 @@
             ${desktopEnabled() ? "Deaktivieren" : "Aktivieren"}
           </button>
         </div>
-        <p class="muted">Erhalte eine System-Benachrichtigung, wenn eine neue (nicht dringende) Nachricht vom Supervisor eintrifft.</p>
+        <p class="muted">Erhalte jede Benachrichtigung (Anmeldungen, Zuteilungen, Strafstunden, Ansagen …) auch als System-Benachrichtigung – egal ob die Website offen ist oder nicht.</p>
       </div>
 
       <div class="container">
@@ -1264,7 +1345,7 @@
         lastAnnounceKey = latest.id;
         if (latest.dringend === true) {
           showUrgentOverlay(latest);
-        } else if (desktopEnabled() && state.latestAnnounce && latest.id !== state.lastDesktopNotif) {
+        } else if (!pushActive && desktopEnabled() && state.latestAnnounce && latest.id !== state.lastDesktopNotif) {
           state.lastDesktopNotif = latest.id;
           fireDesktopNotif(latest);
         }
@@ -1687,19 +1768,6 @@
       .then(() => render())
       .catch((e) => toast(e.message, "err"));
   }
-  function kundenserviceSignup(id) {
-    if (!state.planShiftId) { toast("Erst eine Shift wählen", "err"); return; }
-    state.view = "anmeldung";
-    state.anmeldungArt = "kundenservice";
-    state.anmeldungShiftId = state.planShiftId;
-    render();
-    setTimeout(() => {
-      const sel = document.getElementById("an-standort");
-      if (sel) sel.value = id;
-      toast("Kundenservice-Anmeldung für diese Shift – mindestens 30 Minuten.", "ok");
-    }, 60);
-  }
-
   // ---- Activity ----
   async function signupActivity() {
     try {
@@ -2103,23 +2171,26 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   }
   async function toggleDesktop() {
     if (desktopEnabled()) {
-      localStorage.removeItem(DESKTOP_KEY);
+      localStorage.setItem(DESKTOP_KEY, "0");
+      await pushUnsubscribe();
       toast("Desktop-Benachrichtigungen deaktiviert", "ok");
       render();
       return;
     }
-    if (!("Notification" in window)) { toast("Dieser Browser unterstützt keine Desktop-Benachrichtigungen", "err"); return; }
-    const perm = await Notification.requestPermission();
-    if (perm === "granted") {
-      localStorage.setItem(DESKTOP_KEY, "1");
-      toast("Desktop-Benachrichtigungen aktiv", "ok");
-    } else toast("Berechtigung nicht erteilt", "err");
+    localStorage.setItem(DESKTOP_KEY, "1");
+    const ok = await setPushEnabled(true);
+    if (!ok) {
+      localStorage.setItem(DESKTOP_KEY, "0");
+      render();
+      return;
+    }
     render();
   }
 
   // ---- Inline-Handler-Helfer (für onchange etc.) ----
   function setAnmeldungShift(v) { state.anmeldungShiftId = v; }
   function setAnmeldungArt(v) { state.anmeldungArt = v; render(); }
+  function setAnmeldungStandort(v) { state.anmeldungStandortId = v; }
   function setActivityRange(v) { state.activityRange = v; state.actAll = null; render(); }
   function setAppFilterNutzer(v) { state.appFilter.nutzer = v; state.appsAll = null; render(); }
   function setAppFilterShift(v) { state.appFilter.shift = v; state.appsAll = null; render(); }
@@ -2166,6 +2237,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       document.documentElement.lang = (state.user.language === "en") ? "en" : "de";
       await bootstrapAfterLogin();
       render();
+      tryEnablePush();
     } catch (e) {
       Auth.clear();
       render();
@@ -2174,7 +2246,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
 
   window.VBG = {
     setView, setSuperTab, doLogin, doLogout,
-    setAnmeldungShift, setAnmeldungArt, setActivityRange,
+    setAnmeldungShift, setAnmeldungArt, setAnmeldungStandort, setActivityRange,
     setAppFilterNutzer, setAppFilterShift, resetAppFilter,
     toggleNotif, readNotif, readAllNotifs,
     openAnnounce, sendAnnounce, markAnnounceSeen,
@@ -2183,7 +2255,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     assignDuty, assignDutyVehicle, saveDutyBemerk, editDutyTimes, toggleDutyCancel, deleteDuty,
     assignTrip, assignTripVehicle, toggleTripCancel, toggleTripEdit, toggleStopCancel, addStop,
     submitAnmeldung, withdrawApp,
-    addStandort, renameStandort, delStandort, kundenserviceSignup,
+    addStandort, renameStandort, delStandort,
     signupActivity,
     showUserForm, createUser, copyPwResult, editUser, saveUserEdit, strafe, resetPw, toggleSuspend, deleteUser,
     fristMonate, fristEntfernen, fristSetzen, fristSaveModal,
