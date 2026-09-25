@@ -241,7 +241,11 @@ tr:last-child td { border-bottom: none; }
 .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 .duty-card { background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; animation: fadeUp .18s ease; }
-.duty-card.cancelled { opacity: .7; border-color: var(--red); }
+.duty-card.cancelled { border: 2px dashed var(--red); background: rgba(239,68,68,.06); }
+.duty-card.cancelled .duty-title { color: var(--red); }
+.duty-card.cancelled .duty-title span { text-decoration: line-through; }
+.duty-card.cancelled .duty-meta { color: var(--red); }
+.duty-card.cancelled .duty-meta b { color: var(--red); }
 .duty-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
 .duty-title { font-weight: 700; font-size: 15px; }
 .duty-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -289,7 +293,9 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 /* ---------- Shiftplan-Listen ---------- */
 .pause-row td { background: rgba(56,189,248,.04); }
 .pause-label { font-size: 12px; font-weight: 600; }
-.cancelled-row { opacity: .55; }
+.cancelled-row { opacity: .8; }
+.cancelled-row td:nth-child(-n+7) { color: var(--red); text-decoration: line-through; }
+.cancelled-row td:nth-child(-n+7) b { color: var(--red); }
 .leer-row td { background: rgba(147,163,180,.07); }
 .leer-row { color: var(--muted); }
 .stop-box { margin: 6px 0 0; }
