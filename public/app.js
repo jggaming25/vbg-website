@@ -820,13 +820,28 @@
   }
 
   // ---------- Activity ----------
+  function tokenActive() {
+    const t = Auth.getToken();
+    if (!t) return false;
+    try {
+      const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (typeof payload.exp === "number" && payload.exp * 1000 <= Date.now()) {
+        window.dispatchEvent(new Event("vbg:logout"));
+        return false;
+      }
+    } catch (e) { /* Token nicht dekodierbar → Server entscheidet */ }
+    return true;
+  }
   async function loadActivityMe() {
+    if (!tokenActive()) return null;
     try { return await api("GET", "/api/activity/me"); } catch (e) { return null; }
   }
   async function loadActivityMeMonth() {
+    if (!tokenActive()) return null;
     try { return await api("GET", "/api/activity/me?zeitraum=monat"); } catch (e) { return null; }
   }
   async function loadActivityAll() {
+    if (!tokenActive()) return null;
     try { return await api("GET", "/api/activity/all?zeitraum=" + state.activityRange); } catch (e) { return null; }
   }
 
@@ -834,13 +849,18 @@
     return activityMeView();
   }
 
+  let activityLoading = false;
   function activityMeView() {
     const me = state.actMe;
     const month = state.actMeMonth;
     if (!me || !month) {
-      Promise.all([loadActivityMe(), loadActivityMeMonth()]).then(([r, m]) => {
-        state.actMe = r; state.actMeMonth = m; render();
-      });
+      if (!activityLoading) {
+        activityLoading = true;
+        Promise.all([loadActivityMe(), loadActivityMeMonth()]).then(([r, m]) => {
+          activityLoading = false;
+          state.actMe = r; state.actMeMonth = m; render();
+        });
+      }
       return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
     }
     const bereit = me.fahrMin >= 60;
@@ -2097,6 +2117,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     state.notifications = [];
     render();
   }
+  // 401 (z. B. abgelaufener Session-Token) → sauber ausloggen, kein Hängenbleiben auf der View
+  window.addEventListener("vbg:logout", doLogout);
 
   // ---------- Polling ----------
   let pollTimer = null;
