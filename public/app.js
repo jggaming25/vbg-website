@@ -1060,7 +1060,7 @@
         <div class="flex" style="gap:6px;flex-wrap:wrap">${pills || `<span class="muted">Noch keine Fahrzeuge angelegt</span>`}</div>
         <button class="btn" onclick="VBG.showFbForm()">+ Neuer Eintrag</button>
       </div>
-      ${sel ? `<div class="muted" style="margin:6px 0">${h(sel.wagennummer || "")}${sel.typ ? " · " + h(sel.typ) : ""}${sel.kennzeichen ? " · " + h(sel.kennzeichen) : ""}${sel.status ? " · " + h((FZ_STATUS[sel.status] || {}).label || sel.status) : ""}</div>` : ""}
+      ${sel ? `<div class="muted" style="margin:6px 0">${h(sel.wagennummer || "")}${sel.typ ? " · " + h(sel.typ) : ""}${sel.kennzeichen ? " · " + h(sel.kennzeichen) : ""}${sel.status ? " · " + h((VEHICLE_STATUS[sel.status] || {}).label || sel.status) : ""}</div>` : ""}
       <div id="fb-form"></div>
       ${vehEntries.length ? `
         <div class="container">
