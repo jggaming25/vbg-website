@@ -6,12 +6,22 @@
 // Account, Gerätesperre, Supervisor-Nachrichten)
 // ============================================================
 
-// ---------- Gerätesperre (nur PC/Laptop/Tablet/Surface) ----------
+// ---------- Gerätesperre (nur Handys/Konsolen, kein PC-Fehlalarm) ----------
 (function deviceLock() {
   const UA = navigator.userAgent;
+  // Konsolen-Browser sind eindeutig → immer blocken
   const konsole = /xbox|playstation|nintendo\s?(switch)?|gamecube/i.test(UA);
-  const handy = /iPhone|iPod|Android.*Mobile|Windows Phone|Opera Mini|BlackBerry|IEMobile|Openwave/i.test(UA);
-  if (konsole || handy) {
+  // Handy = mehrere Signale zusammen (UA-Muster + Touch + kleine Bildschirmfläche),
+  // damit ein Desktop-PC mit auffälligem UA nicht versehentlich geblockt wird.
+  const handyUA = /iPhone|iPod|Android.*Mobile|Windows Phone|Opera Mini|BlackBerry|IEMobile|Openwave|Mobile|Mobi/i.test(UA);
+  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints || 0) > 0;
+  const w = window.innerWidth || document.documentElement.clientWidth || 0;
+  const h = window.innerHeight || document.documentElement.clientHeight || 0;
+  const klein = w > 0 && h > 0 && Math.min(w, h) < 900;
+  let bypass = false;
+  try { bypass = sessionStorage.getItem("vbg_device_bypass") === "1"; } catch (e) {}
+  const blocked = konsole || (handyUA && touch && klein);
+  if (blocked && !bypass) {
     document.addEventListener("DOMContentLoaded", function () {
       document.body.innerHTML = `
         <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#10151c;color:#e8eef4;padding:30px;text-align:center">
@@ -19,9 +29,17 @@
             <div style="font-size:52px">🚫</div>
             <h2 style="margin:10px 0 8px">Dieses Gerät wird nicht unterstützt</h2>
             <p style="color:#93a3b4;line-height:1.6">Die VBG-Website läuft nur auf Windows- und Linux-PCs,
-            Apple- und Windows-Surfaces sowie Laptops – nicht auf Handys oder Spielkonsolen.</p>
+            Apple- und Windows-Surfaces sowie Laptops.</p>
+            ${konsole ? "" : `
+            <p style="color:#93a3b4">Falls du sicher bist, dass du am PC/Laptop bist, kannst du fortfahren:</p>
+            <button id="vbg-device-bypass" class="btn" style="background:#2c7a4b;color:#fff;border:none;padding:10px 18px;border-radius:8px;cursor:pointer;margin-top:6px">Trotzdem öffnen</button>`}
           </div>
         </div>`;
+      const b = document.getElementById("vbg-device-bypass");
+      if (b) b.addEventListener("click", function () {
+        try { sessionStorage.setItem("vbg_device_bypass", "1"); } catch (e) {}
+        location.reload();
+      });
     });
   }
 })();
