@@ -498,6 +498,24 @@
     // Offene Anmeldungen zählen
     const offeneApps = state.applications ? state.applications.filter((a) => a.status === "pending").length : 0;
 
+    // Carousel Bilder
+    const carouselImages = [
+      "images/5110391189_86848630987423_1788207798655.png",
+      "images/5110391189_86848630987423_1788207814129.png",
+      "images/5110391189_86848630987423_1788252797774.png",
+      "images/5110391189_86848630987423_1788273961186.png",
+      "images/5110391189_86848630987423_1788273973398.png",
+      "images/5110391189_86848630987423_1788374212674.png",
+      "images/5110391189_86848630987423_1788551637820.png",
+      "images/5110391189_86848630987423_1788551644205.png",
+      "images/5110391189_86848630987423_1788551886809.png",
+      "images/5110391189_86848630987423_1788551896905.png",
+      "images/5110391189_86848630987423_1788552109005.png",
+      "images/5110391189_86848630987423_1788552120873.png",
+      "images/Bild1.png",
+      "images/Netzplan_V1.png",
+    ];
+
     return `
       <h2>Übersicht</h2>
       <div class="card-grid">
@@ -506,6 +524,16 @@
         <div class="stat"><div class="num">${fzGesamt}</div><div class="lbl">Fahrzeuge</div>
           <div class="lbl">${fzEinsatz} einsatzbereit</div></div>
         ${isSup() ? `<div class="stat"><div class="num">${offeneApps}</div><div class="lbl">Offene Anmeldungen</div></div>` : ""}
+      </div>
+
+      <!-- Image Carousel -->
+      <div class="container carousel-container" style="margin-top:18px;overflow:hidden;border-radius:12px;background:var(--panel2);border:1px solid var(--border)">
+        <div class="carousel-track" id="carousel-track" style="display:flex;transition:transform 0.5s ease;width:${carouselImages.length * 100}%;">
+          ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;" loading="lazy"/></div>`).join("")}
+        </div>
+        <div class="carousel-controls" style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
+          ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
+        </div>
       </div>
 
       ${isSup() && kuendigung.length ? `
@@ -786,6 +814,7 @@
               ${!d.cancelled
                 ? `<button class="btn btn-yellow btn-xs" onclick="VBG.toggleDutyCancel('${d.id}')">Ausfallen</button>`
                 : `<button class="btn btn-green btn-xs" onclick="VBG.toggleDutyCancel('${d.id}')">Wieder aktiv</button>`}
+              ${d.assignedUserId ? `<button class="btn btn-ghost btn-xs" onclick="VBG.swapDriver('${d.id}')" title="Fahrer mit anderer Duty tauschen">⇄ Fahrer</button>` : ""}
               <button class="btn btn-danger btn-xs" onclick="VBG.deleteDuty('${d.id}')">×</button>
             </div>` : ""}
         </div>
@@ -1920,17 +1949,68 @@
     if (!drop) return;
     if (!state.notifOpen) { drop.classList.remove("open"); return; }
     drop.classList.add("open");
+    
+    // Group by type
+    const groups = {};
+    state.notifications.forEach((n) => {
+      const type = n.type || "info";
+      if (!groups[type]) groups[type] = [];
+      groups[type].push(n);
+    });
+    const typeOrder = ["danger", "warn", "success", "info", "announce", "apply"];
+    const typeLabels = {
+      danger: "⚠ Wichtig",
+      warn: "⚠ Warnung",
+      success: "✓ Erfolgt",
+      info: "ℹ Info",
+      announce: "📢 Ansagen",
+      apply: "📝 Anmeldungen",
+    };
+    const typeIcons = {
+      danger: "🔴",
+      warn: "🟠",
+      success: "🟢",
+      info: "🔵",
+      announce: "📢",
+      apply: "📝",
+    };
+
     drop.innerHTML = `
-      <div class="head"><span>Benachrichtigungen</span>
-        <button class="btn btn-ghost btn-xs" onclick="VBG.readAllNotifs(event)">Alle Gelesen</button>
+      <div class="notif-header">
+        <h3>Benachrichtigungen <span class="badge" id="notif-badge">${state.notifications.filter((n) => !n.read).length}</span></h3>
+        <div class="flex">
+          <button class="btn btn-ghost btn-xs" onclick="VBG.readAllNotifs(event)" title="Alle als gelesen markieren">✓ Alle gelesen</button>
+        </div>
       </div>
-      ${state.notifications.length === 0 ? `<div class="notif-empty">Keine neuen Benachrichtigungen.</div>`
-        : state.notifications.map((n) => `
-          <div class="notif-item ${n.read ? "" : "unread"}" onclick="VBG.readNotif('${n.id}', event)">
-            ${n.type ? `<span class="tag ${n.type}">${h(n.type)}</span> ` : ""}
-            <span>${h(n.message)}</span>
-            <div class="time">${fmtTime(n.createdAt)}</div>
-          </div>`).join("")}`;
+      <div class="notif-list" style="max-height:400px;overflow-y:auto">
+        ${state.notifications.length === 0
+          ? `<div class="notif-empty" style="padding:20px;text-align:center;color:var(--muted)">Keine Benachrichtigungen.</div>`
+          : typeOrder.map((type) => {
+              const items = groups[type];
+              if (!items || !items.length) return "";
+              return `
+                <div class="notif-group">
+                  <div class="notif-group-header" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--border);font-weight:600;font-size:12px;text-transform:uppercase;color:var(--muted)">
+                    <span>${typeIcons[type] || "•"}</span>
+                    <span>${typeLabels[type] || type}</span>
+                    <span class="badge" style="margin-left:auto">${items.filter(n => !n.read).length}/${items.length}</span>
+                  </div>
+                  ${items.map((n) => `
+                    <div class="notif-item ${n.read ? "read" : "unread"}" onclick="VBG.readNotif('${n.id}', event)" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;${n.read ? "opacity:0.7" : "background:var(--accent-bg,rgba(0,150,255,0.05))"}">
+                      <div style="flex:1;min-width:0">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                          <span class="tag ${type}" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--${type === "danger" ? "red" : type === "warn" ? "yellow" : type === "success" ? "green" : "blue"}-bg,rgba(0,0,0,0.1));color:var(--${type === "danger" ? "red" : type === "warn" ? "yellow" : type === "success" ? "green" : "blue"})">${typeLabels[type] || type}</span>
+                          ${n.urgent ? `<span class="tag urgent" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--red);color:white">⚡ DRINGEND</span>` : ""}
+                          ${n.dringend ? `<span class="tag urgent" style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--red);color:white">⚡ DRINGEND</span>` : ""}
+                        </div>
+                        <div style="font-size:13px;line-height:1.4;color:var(--text)">${h(n.message)}</div>
+                        ${n.actionUrl ? `<div style="margin-top:6px"><a href="${h(n.actionUrl)}" onclick="event.stopPropagation()" class="btn btn-ghost btn-xs">Aktion</a></div>` : ""}
+                      </div>
+                      <div class="time" style="font-size:10px;color:var(--muted);white-space:nowrap;flex-shrink:0">${fmtTime(n.createdAt)}</div>
+                    </div>`).join("")}
+                </div>`;
+            }).join("")}
+      </div>`;
     renderTopbarBadge();
   }
 
@@ -2147,6 +2227,21 @@
     try {
       await api("PATCH", "/api/duties/" + dutyId, { cancelled: !d.cancelled });
       toast(d.cancelled ? "Duty wieder aktiv" : "Duty ausgefallen", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function swapDriver(dutyId) {
+    const d = state.plan.duties.find((x) => x.id === dutyId);
+    if (!d) return;
+    const otherDuties = state.plan.duties.filter((x) => x.id !== dutyId && x.assignedUserId);
+    if (!otherDuties.length) { toast("Keine andere Duty mit Fahrer zum Tauschen", "err"); return; }
+    const options = otherDuties.map((x) => `<option value="${x.id}">${h(x.name)} – ${h(x.assignedUsername || "?")}</option>`).join("");
+    const pick = prompt("Mit welcher Duty tauschen? (ID eingeben)\nVerfügbar: " + otherDuties.map(x => x.id + "=" + x.name).join(", "));
+    if (!pick) return;
+    if (!otherDuties.find((x) => x.id === pick)) { toast("Ungültige Duty-ID", "err"); return; }
+    try {
+      await api("POST", "/api/duties/swap-driver", { dutyId1: dutyId, dutyId2: pick });
+      toast("Fahrer getauscht", "ok");
       await loadPlan(); render();
     } catch (e) { toast(e.message, "err"); }
   }
@@ -2739,7 +2834,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       if (state.view === "supervisor" && state.superTab === "anmeldungen") await loadAppsAll();
       if (state.view === "fahrtenbuch") await loadFahrtenbuch();
       if (state.view === "supervisor" && state.superTab === "protokoll") await loadSuperLog();
-    }, 20000);
+    }, 60000);
   }
 
   // ---------- Init ----------
@@ -2752,11 +2847,37 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       document.documentElement.lang = (state.user.language === "en") ? "en" : "de";
       await bootstrapAfterLogin();
       render();
+      initCarousel();
       tryEnablePush();
     } catch (e) {
       Auth.clear();
       render();
     }
+  }
+
+  let carouselTimer = null;
+  let carouselIndex = 0;
+  function initCarousel() {
+    const track = document.getElementById("carousel-track");
+    const dots = document.querySelectorAll(".carousel-dot");
+    if (!track || !dots.length) { return; }
+    if (carouselTimer) clearInterval(carouselTimer);
+    carouselTimer = setInterval(() => {
+      carouselIndex = (carouselIndex + 1) % dots.length;
+      updateCarousel(track, dots, carouselIndex);
+    }, 5000);
+    dots.forEach((dot, i) => {
+      dot.onclick = () => {
+        carouselIndex = i;
+        updateCarousel(track, dots, carouselIndex);
+      };
+    });
+  }
+  function updateCarousel(track, dots, index) {
+    if (!track) return;
+    const slideWidth = 100 / dots.length;
+    track.style.transform = `translateX(-${index * slideWidth}%)`;
+    dots.forEach((d, i) => d.style.background = i === index ? "var(--accent)" : "var(--muted)");
   }
 
   window.VBG = {
@@ -2767,7 +2888,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     openAnnounce, sendAnnounce, markAnnounceSeen,
     showShiftForm, hideShiftForm, editShift, newShiftFromTpl, saveShift, deleteShift,
     selectPlanShift, openPlan, reloadFromTpl, toggleStops, toggleDutyStops,
-    assignDuty, assignDutyVehicle, saveDutyBemerk, editDutyTimes, toggleDutyCancel, deleteDuty,
+    assignDuty, assignDutyVehicle, saveDutyBemerk, editDutyTimes, toggleDutyCancel, swapDriver, deleteDuty,
     assignTrip, assignTripVehicle, toggleTripCancel, toggleTripEdit, toggleStopCancel, addStop,
     submitAnmeldung, withdrawApp,
     addStandort, renameStandort, delStandort,

@@ -1180,11 +1180,24 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
   if (fromTemplate !== false) {
     const tpl = tagesplanShift(data);
     if (tpl) {
-      data.duties.filter((d) => d.shiftId === tpl.id).forEach((d) => {
+      const templateDuties = data.duties.filter((d) => d.shiftId === tpl.id);
+      // Shift-Dauer in Minuten
+      const shiftStartMin = toMin(shift.startTime);
+      const shiftEndMin = toMin(shift.endTime);
+      const shiftDuration = (shiftStartMin !== null && shiftEndMin !== null)
+        ? (shiftEndMin >= shiftStartMin ? shiftEndMin - shiftStartMin : shiftEndMin + 1440 - shiftStartMin)
+        : 0;
+      // Max Dutys: ca. 1 pro 35 Min, aber 5-7 bei 3h
+      const maxDutys = shiftDuration > 0
+        ? Math.min(7, Math.max(5, Math.round(shiftDuration / 35)))
+        : templateDuties.length;
+      templateDuties.slice(0, maxDutys).forEach((d, idx) => {
         const nd = {
           ...d,
           id: uid(),
           shiftId: shift.id,
+          name: "Duty " + (idx + 1),
+          kurs: "",
           assignment: undefined,
           assignedUserId: null,
           vehicleId: null,
@@ -1201,7 +1214,6 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
             stops: (t.stops || []).map((s) => ({ ...s, id: uid(), cancelled: false })),
           })),
         };
-        // Dutys nur auf die Shift-Zeitfenster begrenzen (Feature „Dutys in der Shiftzeit“)
         cutDutyToShiftTimes(nd, shift);
         data.duties.push(nd);
         copied++;
@@ -1385,6 +1397,37 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   audit(data, req.user, "Duty bearbeitet", duty.name);
   db.save();
   res.json({ duty: enrichDuty(duty) });
+});
+
+// Fahrer-Tausch zwischen zwei Dutys
+app.post("/api/duties/swap-driver", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const { dutyId1, dutyId2 } = req.body || {};
+  if (!dutyId1 || !dutyId2 || dutyId1 === dutyId2) {
+    return res.status(400).json({ error: "Zwei verschiedene Duty-IDs erforderlich" });
+  }
+  const d1 = data.duties.find((d) => d.id === dutyId1);
+  const d2 = data.duties.find((d) => d.id === dutyId2);
+  if (!d1 || !d2) return res.status(404).json({ error: "Eine oder beide Dutys nicht gefunden" });
+  const u1 = d1.assignedUserId;
+  const u2 = d2.assignedUserId;
+  if (!u1 && !u2) return res.status(400).json({ error: "Kein Fahrer zum Tauschen vorhanden" });
+  // Konfliktprüfung für beide Richtungen
+  if (u2) {
+    const konflikt1 = zuteilungsKonflikt(u2, d1, null, null, null);
+    if (konflikt1) return res.status(400).json({ error: "Tausch nicht möglich: " + konflikt1 });
+  }
+  if (u1) {
+    const konflikt2 = zuteilungsKonflikt(u1, d2, null, null, null);
+    if (konflikt2) return res.status(400).json({ error: "Tausch nicht möglich: " + konflikt2 });
+  }
+  d1.assignedUserId = u2;
+  d2.assignedUserId = u1;
+  if (u2) notify(u2, `Du wurdest der Duty "${d1.name}" zugeteilt (Tausch).`, "info");
+  if (u1) notify(u1, `Du wurdest der Duty "${d2.name}" zugeteilt (Tausch).`, "info");
+  audit(data, req.user, "Fahrer getauscht", `${d1.name} <-> ${d2.name}`);
+  db.save();
+  res.json({ duty1: enrichDuty(d1), duty2: enrichDuty(d2) });
 });
 
 app.delete("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
