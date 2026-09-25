@@ -532,7 +532,7 @@
           ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;" loading="lazy"/></div>`).join("")}
         </div>
         <div class="carousel-controls" style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
-          ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
+          ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="flex:0 0 auto;width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
         </div>
       </div>
 
@@ -1781,7 +1781,7 @@
           </button>
         </div>
         <p class="muted">Erhalte jede Benachrichtigung (Anmeldungen, Zuteilungen, Strafstunden, Ansagen …) auch als System-Benachrichtigung – egal ob die Website offen ist oder nicht.</p>
-        ${Notification.permission !== "granted" ? `<p class="muted" style="color:var(--yellow)"><b>Hinweis:</b> Damit Benachrichtigungen funktionieren, muss im Browser <b>„Benachrichtigungen zulassen“</b> aktiviert sein (🔒 Symbol in der Adressleiste → Benachrichtigungen → Zulassen).</p>` : ""}
+        ${Notification.permission !== "granted" ? `<p class="muted" style="color:var(--yellow)"><b>Hinweis:</b> Damit Benachrichtigungen funktionieren, muss im Browser <b>„Benachrichtigungen zulassen“</b> aktiviert sein (🔒 Symbol in der Adressleiste → Benachrichtigungen → <b>Zulassen</b>).<br>Unter <b>Windows</b> zusätzlich: <b>Einstellungen → Datenschutz & Sicherheit → Benachrichtigungen → „Apps Benachrichtigungen senden lassen“ AN</b> + Browser (Chrome/Edge) in der Liste erlauben.</p>` : ""}
       </div>
 
       <div class="container">
