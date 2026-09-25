@@ -85,6 +85,17 @@
     const hh = Math.floor(m / 60), mm = m % 60;
     return hh > 0 ? hh + " h " + (mm ? mm + " min" : "") : mm + " min";
   }
+  function fmtTime(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const date = String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + ".";
+    return sameDay ? hh + ":" + mm : date + " " + hh + ":" + mm;
+  }
 
   // ---------- Konstanten ----------
   const ROLE_LABELS = { supervisor: "Supervisor", senior: "Senior Busfahrer", user: "Busfahrer" };
@@ -133,7 +144,7 @@
   function isSup() { return state.user && state.user.role === "supervisor"; }
   function isDriver() { return state.user && (state.user.role === "user" || state.user.role === "senior"); }
   function isTemplateShift(s) {
-    return s && (s.id === "tpl-tagesplan" || /staff\s*shift/i.test(s.name || ""));
+    return s && s.id === "tpl-tagesplan";
   }
   function realShifts() { return state.shifts.filter((s) => !isTemplateShift(s)); }
 
@@ -266,8 +277,8 @@
         </div>
         <div class="userbox">
           <button class="userbox-btn" onclick="VBG.setView('account')">
-            <span class="avatar">${h(avatarLetter(u))}</span>
-            <span class="name">${h(u.username || "")}</span>
+            ${avatarHtml(u)}
+            <span class="name">${h(u.displayName || u.username || "")}</span>
           </button>
         </div>
       </div>
@@ -275,8 +286,18 @@
   }
 
   function avatarLetter(u) {
-    if (u && u.avatar) return u.avatar.slice(0, 1).toUpperCase();
+    if (u && u.avatar && u.avatar.indexOf("data:image") !== 0) return u.avatar.slice(0, 1).toUpperCase();
     return ((u && u.username) || "?").slice(0, 1).toUpperCase();
+  }
+
+  // Avatar als <img> (bei hochgeladenem Bild) oder Buchstaben-Kreis
+  function avatarHtml(u, cls = "", style = "") {
+    const clsAttr = cls ? `avatar ${cls}` : "avatar";
+    const img = u && u.avatar && u.avatar.indexOf("data:image") === 0;
+    if (img) {
+      return `<span class="${clsAttr}" style="overflow:hidden;padding:0${style ? ";" + style : ""}"><img src="${u.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit"/></span>`;
+    }
+    return `<span class="${clsAttr}"${style ? ` style="${style}"` : ""}>${h(avatarLetter(u))}</span>`;
   }
 
   function renderTopbarBadge() {
@@ -753,15 +774,8 @@
         <div class="stat"><div class="num">${fmtMin(me.activityMin || 0)}</div><div class="lbl">Activity-Zeit (60 % deiner Fahrzeit)</div></div>
         <div class="stat"><div class="num">${fmtMin(me.fahrMin || 0)}</div><div class="lbl">Reine Fahrzeit (ohne Pausen)</div></div>
         <div class="stat"><div class="num">${(me.signups || []).length}</div><div class="lbl">Activity-Anmeldungen</div></div>
-      </div>
-      <div class="container" style="border-color:${monOk ? "var(--green)" : "var(--yellow)"}">
-        <b>Monatsziel: mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit</b>
-        <div class="muted" style="margin-top:4px">
-          Diesen Monat: <b>${fmtMin(monFahr)}</b>
-          ${monOk
-            ? `<span class="badge green" style="margin-left:8px">Ziel erreicht ✓</span>`
-            : `<span class="badge yellow" style="margin-left:8px">Noch ${fmtMin(monRest)} bis zum Ziel</span>`}
-        </div>
+        <div class="stat"><div class="num" style="color:${monOk ? "var(--green)" : "var(--yellow)"}">${monOk ? "✓ " + fmtMin(monFahr) : fmtMin(monFahr)}</div>
+          <div class="lbl">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)${monOk ? " – erreicht" : ` – noch ${fmtMin(monRest)}`}</div></div>
       </div>
       <div class="container">
         <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten reine Fahrzeit
@@ -780,8 +794,15 @@
     }
     const MOENTLICHES_ZIEL = 240; // mind. 4 h gefahrene Zeit pro Kalendermonat
     const mono = state.activityRange === "monat";
-    const gefaehrdet = mono ? rows.rows.filter((r) => r.role !== "supervisor" && (r.fahrMin || 0) < MOENTLICHES_ZIEL) : [];
-    const gefaehrdetHtml = mono ? `
+    // Gefährdet-Liste erscheint erst in der letzten Kalenderwoche des Monats
+    function isLastWeekOfMonth() {
+      const n = new Date();
+      const daysInMonth = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
+      return (daysInMonth - n.getDate()) <= 7;
+    }
+    const showGef = mono && isLastWeekOfMonth();
+    const gefaehrdet = showGef ? rows.rows.filter((r) => r.role !== "supervisor" && (r.fahrMin || 0) < MOENTLICHES_ZIEL) : [];
+    const gefaehrdetHtml = mono ? (showGef ? `
       <div class="container" style="border-color:${gefaehrdet.length ? "var(--red)" : "var(--green)"}">
         <h2 style="margin:0">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)</h2>
         ${gefaehrdet.length === 0
@@ -794,7 +815,11 @@
               </div>`).join("")}
             <p class="muted" style="margin:10px 0 0">Bewertung pro Kalendermonat; unterhalb von ${fmtMin(MOENTLICHES_ZIEL)} gilt eine Person als gefährdet.</p>
           </div>`}
-      </div>` : "";
+      </div>`
+    : `<div class="container" style="border-color:var(--yellow);opacity:.9">
+        <b>Gefährdet-Überblick (Monat)</b>
+        <p class="muted" style="margin:6px 0 0">Die Gefährdet-Liste erscheint automatisch in der letzten Kalenderwoche des Monats.</p>
+      </div>`) : "";
     return `
       <h2>Activity – alle Nutzer</h2>
       <div class="flex" style="margin-bottom:14px">
@@ -845,7 +870,7 @@
   function superUsersView() {
     const rows = (state.users || []).map((u) => `
       <tr class="${u.kündigung ? "warn-hot" : ""}">
-        <td><b>${h(u.username)}</b>
+        <td><div class="flex" style="gap:4px;align-items:center"><b>${h(u.username)}</b>${u.displayName ? `<span class="badge sky">${h(u.displayName)}</span>` : ""}</div>
           ${u.protected ? `<span class="crown" title="geschützt">♛</span>` : ""}
           ${u.suspended ? `<span class="badge red">gesperrt</span>` : ""}
           ${u.kündigung ? `<span class="badge red">Kündigung droht</span>` : ""}
@@ -975,11 +1000,17 @@
   // ---------- Account ----------
   const DESKTOP_KEY = "vbg_desktop_notif";
   function desktopEnabled() { return localStorage.getItem(DESKTOP_KEY) === "1"; }
+  let pendingAvatar = null;
 
   function renderAccount() {
     const u = state.user;
     const prof = state.profile || null;
     const robloxEditable = prof ? prof.robloxEditable : (u && u.robloxEditable);
+    const language2 = (u && u.language) || "de";
+    const dnLocked = !(u && u.displayNameEditable);
+    const dnNext = dnLocked && u && u.displayNameChangedAt
+      ? new Date(new Date(u.displayNameChangedAt).getTime() + 1000 * 60 * 60 * 24 * 30).toLocaleDateString(language2 === "en" ? "en-GB" : "de-DE")
+      : "";
     const isSelf = true;
     void isSelf;
     return `
@@ -987,25 +1018,36 @@
       <div class="container">
         <div class="spread">
           <div>
-            <h2 style="margin:0">${h(u.username)}</h2>
+            <h2 style="margin:0">${h(u.displayName || u.username)}</h2>
+            ${u.displayName ? `<div class="muted" style="font-size:12px">@${h(u.username)}</div>` : ""}
             ${roleBadge(u.role)}
             <span class="muted">${h(u.discordName ? "Discord: " + u.discordName : "")}</span>
           </div>
-          <span class="avatar" style="width:64px;height:64px;font-size:26px">${h(avatarLetter(u))}</span>
+          <div style="text-align:center">
+            ${avatarHtml(u, "", "width:72px;height:72px;font-size:26px")}
+            <img id="acc-avatar-preview" src="" alt="" style="display:none;width:72px;height:72px;border-radius:50%;object-fit:cover;margin-top:8px"/>
+            <label class="btn btn-sm" style="display:block;margin:8px auto 0;width:max-content;cursor:pointer">
+              Profilbild ändern
+              <input id="acc-avatar-file" type="file" accept="image/*" style="display:none" onchange="VBG.onAvatarFile(this)"/>
+            </label>
+          </div>
         </div>
 
         <div class="form-grid" style="margin-top:14px">
+          <label>Anzeigename<input id="acc-displayname" value="${h(u.displayName || "")}" placeholder="Anzeigename (z. B. dein Busfahrer-Rangname)" ${dnLocked ? "disabled" : ""}/></label>
           <label>Discord Name<input id="acc-discord" value="${h(u.discordName || "")}" placeholder="z. B. jg_gaming"/></label>
           <label>Roblox Name<input id="acc-roblox" value="${h(u.robloxName || "")}" placeholder="z. B. jggaming2518"
             ${!robloxEditable ? "disabled" : ""}/></label>
           <label>Sprache der Website<select id="acc-lang">
-            <option value="de" ${u.language !== "en" ? "selected" : ""}>Deutsch</option>
-            <option value="en" ${u.language === "en" ? "selected" : ""}>English</option>
+            <option value="de" ${language2 !== "en" ? "selected" : ""}>Deutsch</option>
+            <option value="en" ${language2 === "en" ? "selected" : ""}>English</option>
           </select></label>
         </div>
+        ${dnLocked ? `<div class="muted" style="margin-top:6px">Anzeigename ist nur 1x pro Monat änderbar – nächste Änderung ab <b>${h(dnNext)}</b>. Ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : ""}
         ${!robloxEditable ? `<div class="muted" style="margin-top:6px">Roblox-Name ist nur alle 6 Monate änderbar – ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : ""}
         <div style="margin-top:12px">
           <button class="btn btn-green" onclick="VBG.saveProfile()">Profil speichern</button>
+          <span class="muted" style="margin-left:8px">Profilbild wird direkt beim Speichern übernommen.</span>
         </div>
       </div>
 
@@ -1067,7 +1109,8 @@
           <label class="checkline"><input type="checkbox" value="senior" checked/> Senior Busfahrer</label>
           <label class="checkline"><input type="checkbox" value="supervisor" checked/> Supervisor</label>
         </fieldset>
-        <label class="checkline"><input id="ann-dringend" type="checkbox"/> Dringend (rotes Overlay + Warnton)</label>
+        <label class="checkline"><input id="ann-dringend" type="checkbox" onchange="this.closest('.modal').querySelector('#ann-dringend-hint').style.display=this.checked?'block':'none'"/> Dringend (rotes Overlay + Warnton)</label>
+        <div id="ann-dringend-hint" class="muted" style="display:none;font-size:12px;margin-top:4px">Dringend erreicht alle aktuell Online-Nutzer – unabhängig von der Zielgruppe.</div>
         <div class="flex" style="margin-top:12px">
           <button class="btn btn-green" onclick="VBG.sendAnnounce()">Senden</button>
           <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
@@ -1089,10 +1132,28 @@
       const key = latest.id + "_" + (latest.read ? "r" : "u");
       renderAnnounceBanner(latest, unseen);
 
-      if (unseen && latest.dringend === true && latest.id !== lastAnnounceKey) {
+      if (unseen && latest.id !== lastAnnounceKey) {
         lastAnnounceKey = latest.id;
-        showUrgentOverlay(latest);
+        if (latest.dringend === true) {
+          showUrgentOverlay(latest);
+        } else if (desktopEnabled() && state.latestAnnounce && latest.id !== state.lastDesktopNotif) {
+          state.lastDesktopNotif = latest.id;
+          fireDesktopNotif(latest);
+        }
       }
+    } catch (e) {}
+  }
+
+  // System-Benachrichtigung (Desktop) für neue, nicht dringende Nachrichten
+  function fireDesktopNotif(latest) {
+    try {
+      if (!("Notification" in window)) return;
+      if (Notification.permission !== "granted") return;
+      const title = "VBG Orga – Neue Nachricht";
+      const rang = latest.rang ? " (" + latest.rang + ")" : "";
+      const body = String(latest.message || "").slice(0, 120);
+      const n = new Notification(title, { body: (latest.von || "Supervisor") + rang + ":\n" + body, tag: "vbg-announce-" + latest.id });
+      setTimeout(() => { try { n.close(); } catch (e) {} }, 15000);
     } catch (e) {}
   }
 
@@ -1103,7 +1164,7 @@
     slot.innerHTML = `
       <div class="announce-banner">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path></svg>
-        <span><b>${h(latest.von || "Supervisor")}:</b> ${h(latest.message)}</span>
+        <span><b>${h(latest.von || "Supervisor")}${latest.rang ? ` (${h(latest.rang)})` : ""}:</b> ${h(latest.message)}</span>
         <button class="btn btn-sm btn-green" onclick="VBG.markAnnounceSeen()">Gelesen</button>
       </div>`;
   }
@@ -1158,7 +1219,7 @@
         <div style="font-size:30px">⚠️</div>
         <h2>Dringende Nachricht</h2>
         <p>${h(ann.message)}</p>
-        <div class="muted">von ${h(ann.von || "Supervisor")}</div>
+        <div class="muted">von ${h(ann.von || "Supervisor")}${ann.rang ? ` (${h(ann.rang)})` : ""}</div>
         <button id="urgent-close" class="btn btn-danger" disabled>Verstanden (${10} s)</button>
       </div>`;
     document.body.appendChild(overlay);
@@ -1592,11 +1653,14 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
             <span class="muted" style="font-size:11px">${robloxReadonly ? "noch nicht abgelaufen (6 Monate)" : "änderbar"}</span>
           </label>
           <label>Sprache<select id="eu-lang"><option value="de" ${u.language !== "en" ? "selected" : ""}>Deutsch</option><option value="en" ${u.language === "en" ? "selected" : ""}>English</option></select></label>
+          <label>Anzeigename<input id="eu-displayname" value="${h(u.displayName || "")}" placeholder="z. B. Präsenz-Name"/></label>
         </div>
+        ${u.displayNameChangedAt ? `<p class="muted" style="margin:6px 0 0">Anzeigename-Sperre (1x/Monat) ist aktiv.
+          <label class="checkline" style="margin-top:4px"><input id="eu-dnreset" type="checkbox"/> Sperre jetzt zurücksetzen</label></p>` : ""}
         <fieldset><legend>Lizenzen</legend>
           ${state.cats.linien.map((l) => `<label class="checkline"><input type="checkbox" value="${l.id}" ${(u.linien || []).includes(l.id) ? "checked" : ""}> ${h(l.name)} – ${h(l.beschreibung || "")}</label>`).join("")}
         </fieldset>
-        ${u.protected ? `<p class="muted">Geschützter Supervisor – Rolle/Lizenzen/Sperre werden hier nicht verändert.</p>` : ""}
+        ${u.protected ? `<p class="muted" id="eu-protected-note">Geschützter Supervisor – Rolle/Lizenzen/Sperre werden hier nicht verändert.</p>` : ""}
         <div class="flex" style="margin-top:8px">
           <button class="btn btn-green" onclick="VBG.saveUserEdit('${u.id}')">Speichern</button>
           <button class="btn btn-ghost" onclick="document.getElementById('user-form').innerHTML=''">Abbrechen</button>
@@ -1612,7 +1676,11 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     };
     const rbx = document.getElementById("eu-roblox");
     if (!rbx.disabled) body.robloxName = rbx.value;
-    if (!document.querySelector("#user-form .container .muted")) {
+    const dnEl = document.getElementById("eu-displayname");
+    if (dnEl) body.displayName = dnEl.value;
+    const dnReset = document.getElementById("eu-dnreset");
+    if (dnReset && dnReset.checked) body.displayNameReset = true;
+    if (!document.getElementById("eu-protected-note")) {
       const linien = [];
       document.querySelectorAll("#user-form .checkline input:checked").forEach((c) => linien.push(c.value));
       body.linien = linien;
@@ -1670,6 +1738,10 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
           <label>Name<input id="nl-name" placeholder="z. B. (SB) 24"/></label>
           <label>Beschreibung<input id="nl-desc" placeholder="z. B. Schnellbus, Nachtbus, …"/></label>
         </div>
+        <div class="flex" style="gap:8px;margin-top:6px">
+          <button class="btn btn-sm" onclick="VBG.loadStopsSuggestions('nl-name', 'nl-desc')">Zeiten aus Fahrplänen übernehmen ↔</button>
+          <span class="muted" style="font-size:12px;align-self:center">Halte + An/Ab werden aus den hinterlegten Fahrplänen (HTML) vorgeschlagen, wenn die Linie dort vorkommt.</span>
+        </div>
         <div id="stops-ed-hin"></div>
         <div id="stops-ed-rueck"></div>
         <div class="flex" style="margin-top:8px">
@@ -1683,44 +1755,64 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   function renderStopsEditor(dir, values) {
     const wrap = document.getElementById("stops-ed-" + dir);
     if (!wrap) return;
-    const title = dir === "hin" ? "Hinweg – Haltestellen & Fahrzeiten" : "Rückweg – Haltestellen & Fahrzeiten";
-    const rows = values.length ? values : [{ station: "", min: 0 }];
+    const title = dir === "hin" ? "Hinweg – Haltestellen mit An/Ab" : "Rückweg – Haltestellen mit An/Ab";
+    const rows = values.length ? values : [{ station: "", an: "", ab: "" }];
     wrap.innerHTML = `
       <fieldset style="margin-top:12px"><legend>${title}</legend>
         ${rows.map((r, i) => `
           <div style="display:flex;gap:8px;margin:6px 0;align-items:center">
             <span class="muted" style="min-width:18px">${i + 1}.</span>
             <input data-st-dir="${dir}" data-st-i="${i}" class="st-station" style="flex:1" placeholder="Haltestelle (${i === 0 ? "Start" : "Zwischenhalt"})" value="${h(r.station || "")}"/>
-            <input data-st-dir="${dir}" data-st-i="${i}" class="st-min" type="number" min="0" step="1" style="width:110px" placeholder="Min." value="${r.min || 0}"/>
+            <input data-st-dir="${dir}" data-st-i="${i}" class="st-ab" type="time" style="width:110px" title="Ab (HH:MM)" value="${h(r.ab || "")}"/>
+            <input data-st-dir="${dir}" data-st-i="${i}" class="st-an" type="time" style="width:110px" title="An (HH:MM)" value="${h(r.an || "")}"/>
             <button class="btn btn-ghost btn-xs" onclick="VBG.removeStopRow('${dir}', ${i})" title="Haltestelle entfernen">×</button>
           </div>`).join("")}
         <button class="btn btn-sm" onclick="VBG.addStopRow('${dir}')">+ Haltestelle</button>
-        <span class="muted" style="margin-left:10px;font-size:12px">Min. = Fahrzeit ab Starthaltepunkt</span>
+        <span class="muted" style="margin-left:10px;font-size:12px">Ab / An im Format <b>HH:MM</b> (z. B. 17:43)</span>
       </fieldset>`;
   }
   function stopValues(dir) {
     return stopValuesRaw(dir).filter((x) => x.station);
   }
   function stopValuesRaw(dir) {
-    return Array.from(document.querySelectorAll('.st-station[data-st-dir="' + dir + '"]')).map((el, i) => ({
-      station: (el.value || "").trim(),
-      min: parseInt((document.querySelectorAll('.st-min[data-st-dir="' + dir + '"]')[i] || {}).value, 10) || 0,
-    }));
+    return Array.from(document.querySelectorAll('.st-station[data-st-dir="' + dir + '"]')).map((el, i) => {
+      const ab = (document.querySelectorAll('.st-ab[data-st-dir="' + dir + '"]')[i] || {}).value || "";
+      const an = (document.querySelectorAll('.st-an[data-st-dir="' + dir + '"]')[i] || {}).value || "";
+      return { station: (el.value || "").trim(), ab: ab || "", an: an || "" };
+    });
   }
   function addStopRow(dir) {
-    renderStopsEditor(dir, stopValuesRaw(dir).concat([{ station: "", min: 0 }]));
+    renderStopsEditor(dir, stopValuesRaw(dir).concat([{ station: "", an: "", ab: "" }]));
   }
   function removeStopRow(dir, i) {
     const v = stopValuesRaw(dir);
     v.splice(i, 1);
     renderStopsEditor(dir, v);
   }
+  async function loadStopsSuggestions(nameFieldId, descFieldId) {
+    if (!nameFieldId) return;
+    const nameEl = document.getElementById(nameFieldId);
+    if (!nameEl) return;
+    const name = (nameEl.value || "").trim();
+    if (!name) { toast("Bitte zuerst den Laufnamen eintragen", "err"); return; }
+    try {
+      const r = await api("GET", "/api/linien/default-stops?name=" + encodeURIComponent(name));
+      renderStopsEditor("hin", r.stopsHin || []);
+      renderStopsEditor("rueck", r.stopsRueck || []);
+      const n = (r.stopsHin || []).length + (r.stopsRueck || []).length;
+      toast("Vorschläge geladen (" + n + " Halte) – auf Speichern klicken", n ? "ok" : "err");
+    } catch (e) { toast(e.message, "err"); }
+  }
   async function createLinie() {
     const name = document.getElementById("nl-name").value.trim();
     const beschreibung = document.getElementById("nl-desc").value.trim();
     if (!name) { toast("Name fehlt", "err"); return; }
+    const body = { name, beschreibung };
+    const hin = stopValues("hin"), rueck = stopValues("rueck");
+    // Leere Stops weg lassen, damit das Backend die Fahrplan-Standardwerte übernimmt
+    if (hin.length || rueck.length) { body.stopsHin = hin; body.stopsRueck = rueck; }
     try {
-      await api("POST", "/api/linien", { name, beschreibung, stopsHin: stopValues("hin"), stopsRueck: stopValues("rueck") });
+      await api("POST", "/api/linien", body);
       toast("Linie angelegt", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render();
     } catch (e) { toast(e.message, "err"); }
   }
@@ -1733,6 +1825,10 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
         <div class="form-grid">
           <label>Name<input id="el-name" value="${h(l.name)}"/></label>
           <label>Beschreibung<input id="el-desc" value="${h(l.beschreibung || "")}" placeholder="z. B. Schnellbus, Nachtbus"/></label>
+        </div>
+        <div class="flex" style="gap:8px;margin-top:6px">
+          <button class="btn btn-sm" onclick="VBG.loadStopsSuggestions('el-name', 'el-desc')">Zeiten aus Fahrplänen übernehmen ↔</button>
+          <span class="muted" style="font-size:12px;align-self:center">Lädt Halte + An/Ab aus den hinterlegten Fahrplänen (HTML) für die aktuelle Laufnummer.</span>
         </div>
         <div id="stops-ed-hin"></div>
         <div id="stops-ed-rueck"></div>
@@ -1755,7 +1851,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   function stopSummary(l) {
     const a = l.stopsHin || [];
     const b = l.stopsRueck || [];
-    const line = (arr) => arr.map((s) => s.station).join(" → ");
+    const line = (arr) => arr.map((s) => (s.ab || s.an) ? `${s.station} (${s.ab || "?"}–${s.an || "?"})` : s.station).join(" → ");
     return `${a.length} Hin · ${b.length} Rück${a.length ? " | Hin: " + line(a) : ""}${b.length ? " | Rück: " + line(b) : ""}`;
   }
   async function delLinie(id) {
@@ -1793,8 +1889,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     if (!text) { toast("Text fehlt", "err"); return; }
     const zielgruppe = [];
     document.querySelectorAll(".modal-backdrop [type=checkbox][value]").forEach((c) => { if (c.checked) zielgruppe.push(c.value); });
-    if (!zielgruppe.length) { toast("Zielgruppe wählen", "err"); return; }
     const dringend = document.getElementById("ann-dringend").checked;
+    if (!zielgruppe.length && !dringend) { toast("Zielgruppe wählen", "err"); return; }
     try {
       await api("POST", "/api/announcements", { text, zielgruppe, dringend });
       toast("Nachricht gesendet", "ok");
@@ -1827,6 +1923,9 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     const body = { discordName, language };
     const rbx = document.getElementById("acc-roblox");
     if (!rbx.disabled) body.robloxName = robloxName;
+    const dn = document.getElementById("acc-displayname");
+    if (dn && !dn.disabled) body.displayName = dn.value;
+    if (pendingAvatar) { body.avatar = pendingAvatar; pendingAvatar = null; }
     try {
       await api("PATCH", "/api/me/profile", body);
       toast("Profil gespeichert", "ok");
@@ -1835,6 +1934,34 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       await loadProfile();
       render();
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  // Profilbild: skalieren + als dataURL vormerken (wird beim Speichern übertragen)
+  function onAvatarFile(input) {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(f.type)) { toast("Bitte ein Bild hochladen (PNG/JPG/WebP)", "err"); input.value = ""; return; }
+    const img = new Image();
+    const fr = new FileReader();
+    fr.onload = () => {
+      img.onload = () => {
+        const MAX = 512;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          const s = Math.min(MAX / w, MAX / h);
+          w = Math.round(w * s); h = Math.round(h * s);
+        }
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        pendingAvatar = cv.toDataURL("image/png");
+        const prev = document.querySelector("#acc-avatar-preview");
+        if (prev) { prev.src = pendingAvatar; prev.style.display = "inline"; }
+        toast("Bild vorgemerkt – Speichern klicken", "ok");
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(f);
   }
   async function toggleDesktop() {
     if (desktopEnabled()) {
@@ -1922,7 +2049,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     showLinieForm, createLinie, editLinie, saveLinie, delLinie,
     addStopRow, removeStopRow,
     acceptApp, denyApp, delApp, acceptWish, denyWish,
-    saveProfile, toggleDesktop,
+    saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
   };
 
   init();

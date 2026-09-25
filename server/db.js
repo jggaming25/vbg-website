@@ -62,6 +62,8 @@ function ensureProtectedSupervisor() {
       discordName: "",
       robloxName: "",
       robloxChangedAt: null,
+      displayName: "",
+      displayNameChangedAt: null,
       language: "de",
       avatar: "",
       suspended: false,
@@ -133,6 +135,8 @@ function load() {
     if (typeof u.discordName !== "string") u.discordName = "";
     if (typeof u.robloxName !== "string") u.robloxName = "";
     if (!u.robloxChangedAt) u.robloxChangedAt = null;
+    if (typeof u.displayName !== "string") u.displayName = "";
+    if (!u.displayNameChangedAt) u.displayNameChangedAt = null;
     if (typeof u.language !== "string") u.language = "de";
     if (typeof u.avatar !== "string") u.avatar = "";
     delete u.fdl;

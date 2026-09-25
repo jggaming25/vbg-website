@@ -82,6 +82,9 @@ function publicUser(u) {
     robloxName: u.robloxName || "",
     robloxChangedAt: u.robloxChangedAt || null,
     robloxEditable: canEditRoblox(u),
+    displayName: u.displayName || "",
+    displayNameChangedAt: u.displayNameChangedAt || null,
+    displayNameEditable: canEditDisplayName(u),
     language: u.language || "de",
     avatar: u.avatar || "",
     suspended: !!u.suspended,
@@ -95,6 +98,13 @@ function canEditRoblox(u) {
   if (!u.robloxChangedAt) return true;
   const six = 1000 * 60 * 60 * 24 * 182;
   return Date.now() - new Date(u.robloxChangedAt).getTime() >= six;
+}
+
+const DISPLAY_NAME_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 30; // 1x pro Monat
+
+function canEditDisplayName(u) {
+  if (!u.displayNameChangedAt) return true;
+  return Date.now() - new Date(u.displayNameChangedAt).getTime() >= DISPLAY_NAME_COOLDOWN_MS;
 }
 
 function notify(userId, message, type) {
@@ -373,6 +383,8 @@ app.post("/api/users", async (req, res) => {
     discordName: "",
     robloxName: "",
     robloxChangedAt: null,
+    displayName: "",
+    displayNameChangedAt: null,
     language: "de",
     avatar: "",
     suspended: false,
@@ -387,13 +399,21 @@ app.post("/api/users", async (req, res) => {
 app.patch("/api/me/profile", requireAuth, async (req, res) => {
   const data = db.load();
   const u = data.users.find((x) => x.id === req.user.id);
-  const { discordName, robloxName, language, avatar } = req.body || {};
+  const { discordName, robloxName, language, avatar, displayName } = req.body || {};
   const isSup = u.role === "supervisor";
   const authUser = u; // wer ändert = der Nutzer selbst (Supervisor ändert über /api/users/:id)
 
   if (typeof discordName === "string") u.discordName = discordName.trim();
   if (typeof language === "string") u.language = language.trim() || "de";
   if (typeof avatar === "string") u.avatar = avatar;
+
+  if (typeof displayName === "string" && displayName.trim() !== (u.displayName || "")) {
+    if (!canEditDisplayName(u)) {
+      return res.status(400).json({ error: "Anzeigename ist nur 1x pro Monat änderbar (oder durch Supervisor)" });
+    }
+    u.displayName = displayName.trim();
+    u.displayNameChangedAt = new Date().toISOString();
+  }
 
   if (typeof robloxName === "string" && robloxName.trim() !== (u.robloxName || "")) {
     if (!canEditRoblox(u)) {
@@ -409,7 +429,7 @@ app.patch("/api/me/profile", requireAuth, async (req, res) => {
     }
   }
   db.save();
-  res.json({ user: publicUser(u), robloxEditable: canEditRoblox(u), robloxChangedAt: u.robloxChangedAt });
+  res.json({ user: publicUser(u), robloxEditable: canEditRoblox(u), robloxChangedAt: u.robloxChangedAt, displayNameEditable: canEditDisplayName(u), displayNameChangedAt: u.displayNameChangedAt });
 });
 
 app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => {
@@ -419,13 +439,18 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
   if (user.protected && (req.body.role || req.body.linien || req.body.suspended !== undefined || req.body.strafstunden !== undefined)) {
     return res.status(403).json({ error: "Geschützter Supervisor kann hier nicht verändert werden" });
   }
-  const { role, linien, suspended, password, strafstunden, discordName, robloxName, language, avatar } = req.body || {};
+  const { role, linien, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset } = req.body || {};
   if (role && (role === "supervisor" || DRIVER_ROLES.includes(role))) user.role = role;
   if (Array.isArray(linien)) user.linien = linien;
   if (typeof suspended === "boolean") user.suspended = suspended;
   if (typeof discordName === "string") user.discordName = discordName.trim();
   if (typeof language === "string") user.language = language.trim() || "de";
   if (typeof avatar === "string") user.avatar = avatar;
+  if (typeof displayName === "string" && displayName.trim() !== (user.displayName || "")) {
+    user.displayName = displayName.trim();
+    user.displayNameChangedAt = new Date().toISOString();
+  }
+  if (displayNameReset === true) user.displayNameChangedAt = null;
   if (typeof robloxName === "string" && robloxName.trim() !== (user.robloxName || "")) {
     user.robloxName = robloxName.trim();
     user.robloxChangedAt = new Date().toISOString();
@@ -499,23 +524,80 @@ function sanitizeStops(v) {
     .map((x) => {
       const station = String((x && (x.station || x.name)) || "").trim();
       if (!station) return null;
-      return { station, min: Math.max(0, Number(x && x.min) || 0) };
+      const item = { station, min: Math.max(0, Number(x && x.min) || 0) };
+      if (x && typeof x.an === "string" && x.an.trim()) item.an = x.an.trim().slice(0, 5);
+      if (x && typeof x.ab === "string" && x.ab.trim()) item.ab = x.ab.trim().slice(0, 5);
+      return item;
     })
     .filter(Boolean);
 }
 
+// Standart-Vorschläge für eine Linie: die häufigsten Haltesequenzen (mit An/Ab-Zeiten)
+// aus den im System hinterlegten Duty-Fahrten (ursprünglich aus den HTML-Daten importiert).
+function defaultStopsForLinie(data, name, linieId) {
+  const wanted = (name || "").trim().toLowerCase();
+  const candidates = (data.duties || []).filter((d) => {
+    if (linieId && d.linieId === linieId) return true;
+    const dn = (d.name || "").trim().toLowerCase();
+    if (!wanted) return false;
+    return dn === wanted || dn.indexOf(wanted + " ") === 0 || dn.indexOf(wanted) === 0;
+  });
+
+  const map = new Map();
+  candidates.forEach((d) => (d.trips || []).forEach((t) => {
+    const stops = (t.stops || []).filter((s) => s && String(s.station || "").trim());
+    if (stops.length < 2) return;
+    const key = stops.map((s) => s.station).join("|");
+    let seq = map.get(key);
+    if (!seq) {
+      seq = { key, count: 0, stops: stops.map((s) => ({ station: String(s.station).trim(), an: s.arr || s.dep || "", ab: s.dep || s.arr || "" })) };
+      map.set(key, seq);
+    }
+    seq.count++;
+  }));
+  const seqs = Array.from(map.values()).sort((a, b) => b.count - a.count);
+  if (!seqs.length) return { stopsHin: [], stopsRueck: [] };
+
+  const hub = (() => {
+    const c = new Map();
+    candidates.forEach((d) => (d.trips || []).forEach((t) => {
+      const k = String(t.to || "").trim();
+      if (k) c.set(k, (c.get(k) || 0) + 1);
+    }));
+    let best = null;
+    c.forEach((n, k) => { if (!best || n > best.n) best = { k, n }; });
+    return best ? best.k : null;
+  })();
+
+  const hin = seqs.find((s) => hub && s.stops[s.stops.length - 1].station === hub) || seqs[0];
+  let rueck = seqs.find((s) => hub && s.stops[0].station === hub)
+    || seqs.find((s) => s !== hin && s.stops[0].station === (hin.stops[hin.stops.length - 1] || {}).station);
+  if (!rueck) rueck = seqs.find((s) => s !== hin) || { stops: hin.stops.slice().reverse() };
+  return { stopsHin: hin.stops, stopsRueck: rueck.stops, vonHand: seqs.length > 0 };
+}
+
 app.get("/api/linien", requireAuth, (req, res) => res.json({ items: db.load().linien }));
+
+// Vorschläge für den Linien-Editor: Halte + An/Ab wie in den hinterlegten Fahrplänen
+app.get("/api/linien/default-stops", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const dflt = defaultStopsForLinie(data, req.query.name || "", null);
+  res.json({ stopsHin: dflt.stopsHin, stopsRueck: dflt.stopsRueck });
+});
 
 app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const name = (req.body && req.body.name || "").trim();
   if (!name) return res.status(400).json({ error: "Name fehlt" });
+  const explicitHin = req.body && req.body.stopsHin !== undefined;
+  const explicitRueck = req.body && req.body.stopsRueck !== undefined;
+  const dflt = (!explicitHin || !explicitRueck) ? defaultStopsForLinie(data, name, null) : null;
   const item = {
     id: uid(),
     name,
     beschreibung: (req.body && req.body.beschreibung || "").trim(),
-    stopsHin: sanitizeStops(req.body && req.body.stopsHin),
-    stopsRueck: sanitizeStops(req.body && req.body.stopsRueck),
+    stopsHin: explicitHin ? sanitizeStops(req.body.stopsHin) : sanitizeStops(dflt && dflt.stopsHin),
+    stopsRueck: explicitRueck ? sanitizeStops(req.body.stopsRueck) : sanitizeStops(dflt && dflt.stopsRueck),
   };
   data.linien.push(item);
   db.save();
@@ -1266,29 +1348,33 @@ app.post("/api/announcements", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const { text, zielgruppe, dringend } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: "Text fehlt" });
-  const audiences = Array.isArray(zielgruppe) && zielgruppe.length
-    ? zielgruppe
-    : ["user", "senior", "supervisor"];
+  const isUrgent = dringend === true || dringend === "true";
+  // Dringend erreicht alle aktuell Online-Nutzer – Zielgruppen werden ignoriert.
+  const audiences = isUrgent
+    ? ["user", "senior", "supervisor"]
+    : (Array.isArray(zielgruppe) && zielgruppe.length ? zielgruppe : ["user", "senior", "supervisor"]);
+  const rang = roleLabel(req.user.role);
 
   const ann = {
     id: uid(),
     text: text.trim(),
     zielgruppen: audiences,
-    dringend: !!dringend,
+    dringend: isUrgent,
     von: req.user.username,
+    rang,
     createdAt: new Date().toISOString(),
   };
   data.announcements.push(ann);
   data.notifications.push({
     id: uid(), userId: "announce-" + ann.id, message: ann.text, type: "announce",
-    announcementId: ann.id, dringend: ann.dringend, von: ann.von,
+    announcementId: ann.id, dringend: ann.dringend, von: ann.von, rang,
     read: false, createdAt: ann.createdAt,
   });
   data.users.forEach((u) => {
     if (audiences.includes(u.role)) {
       data.notifications.push({
         id: uid(), userId: u.id, message: ann.text, type: "announce",
-        announcementId: ann.id, dringend: ann.dringend, von: ann.von,
+        announcementId: ann.id, dringend: ann.dringend, von: ann.von, rang,
         read: false, createdAt: ann.createdAt,
       });
     }
@@ -1307,7 +1393,8 @@ app.get("/api/announcements/latest", requireAuth, (req, res) => {
       if (n.userId === req.user.id) return true; // eigene Ziel-Benachrichtigung
       if (!n.userId.startsWith("announce-")) return false;
       const ann = data.announcements.find((a) => a.id === n.userId.replace("announce-", ""));
-      return !!ann && (ann.zielgruppen || []).includes(req.user.role);
+      // Dringend erreicht alle Online-Nutzer, unabhängig von der Zielgruppe
+      return !!ann && (ann.dringend === true || (ann.zielgruppen || []).includes(req.user.role));
     })
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const latest = items[items.length - 1] || null;
@@ -1317,7 +1404,7 @@ app.get("/api/announcements/latest", requireAuth, (req, res) => {
   let latestResult = latest;
   if (latest && latest.userId && latest.userId.startsWith("announce-")) {
     const ann = data.announcements.find((a) => a.id === latest.userId.replace("announce-", ""));
-    if (ann) latestResult = { ...latest, dringend: ann.dringend === true, von: ann.von };
+    if (ann) latestResult = { ...latest, dringend: ann.dringend === true, von: ann.von, rang: ann.rang || "" };
   }
   res.json({ latest: latestResult, unseen });
 });
