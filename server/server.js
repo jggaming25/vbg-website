@@ -85,6 +85,8 @@ function publicUser(u) {
     displayName: u.displayName || "",
     displayNameChangedAt: u.displayNameChangedAt || null,
     displayNameEditable: canEditDisplayName(u),
+    strafFristBis: u.strafFristBis || null,
+    strafFristAuto: !!u.strafFristAuto,
     language: u.language || "de",
     avatar: u.avatar || "",
     suspended: !!u.suspended,
@@ -105,6 +107,51 @@ const DISPLAY_NAME_COOLDOWN_MS = 1000 * 60 * 60 * 24 * 30; // 1x pro Monat
 function canEditDisplayName(u) {
   if (!u.displayNameChangedAt) return true;
   return Date.now() - new Date(u.displayNameChangedAt).getTime() >= DISPLAY_NAME_COOLDOWN_MS;
+}
+
+// ---------- Strafstunden-Frist ----------
+
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + dd;
+}
+
+// Automatische Frist: +1 Kalendermonat ab heute. Fällt der Tag im Zielmonat weg
+// (z. B. Strafe am 31. → Zielmonat ohne 31.), läuft die Frist bis zum 01. des Folgemonats.
+function autoFristDate(from) {
+  const d = from || new Date();
+  const y = d.getFullYear(), mo = d.getMonth();
+  const plus = new Date(y, mo + 1, d.getDate());
+  if (plus.getMonth() !== ((mo + 1) % 12)) {
+    return toISODate(new Date(y, mo + 2, 1));
+  }
+  return toISODate(plus);
+}
+
+function addMonthsIsoDate(baseIso, months) {
+  const b = baseIso ? new Date(String(baseIso).slice(0, 10) + "T00:00:00") : new Date();
+  if (isNaN(b.getTime())) return autoFristDate(new Date());
+  const y = b.getFullYear(), mo = b.getMonth();
+  const target = new Date(y, mo + Math.round(months), 1);
+  const days = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const dd = Math.min(b.getDate(), days);
+  return toISODate(new Date(target.getFullYear(), target.getMonth(), dd));
+}
+
+// Strafstunden-Frist automatisch pflegen:
+// - unter 3 h → Frist wird entfernt
+// - über/bei 3 h ohne gesetzte Frist → automatisch 1 Monat zum Abarbeiten
+// (außer ein Supervisor hat die Frist bewusst entfernt: strafFristAuto=false)
+function syncStrafFrist(user) {
+  if ((user.strafstunden || 0) < 3) {
+    user.strafFristBis = null;
+    user.strafFristAuto = true; // zurück auf automatisch verwaltet
+  } else if (!user.strafFristBis && user.strafFristAuto !== false) {
+    user.strafFristBis = autoFristDate(new Date());
+    user.strafFristAuto = true;
+  }
 }
 
 function notify(userId, message, type) {
@@ -385,6 +432,8 @@ app.post("/api/users", async (req, res) => {
     robloxChangedAt: null,
     displayName: "",
     displayNameChangedAt: null,
+    strafFristBis: null,
+    strafFristAuto: true,
     language: "de",
     avatar: "",
     suspended: false,
@@ -439,7 +488,7 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
   if (user.protected && (req.body.role || req.body.linien || req.body.suspended !== undefined || req.body.strafstunden !== undefined)) {
     return res.status(403).json({ error: "Geschützter Supervisor kann hier nicht verändert werden" });
   }
-  const { role, linien, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset } = req.body || {};
+  const { role, linien, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset, strafFrist, strafFristDelta } = req.body || {};
   if (role && (role === "supervisor" || DRIVER_ROLES.includes(role))) user.role = role;
   if (Array.isArray(linien)) user.linien = linien;
   if (typeof suspended === "boolean") user.suspended = suspended;
@@ -468,6 +517,22 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
       });
     }
   }
+  // Strafstunden-Frist manuell durch Supervisor: Datum setzen, entfernen oder um Monate verschieben
+  if (strafFrist !== undefined) {
+    if (strafFrist === null || String(strafFrist).trim() === "") {
+      user.strafFristBis = null;
+      user.strafFristAuto = false; // bewusst entfernt → kein Auto-Neu-Setzen
+    } else if (typeof strafFrist === "string") {
+      user.strafFristBis = addMonthsIsoDate(strafFrist, 0);
+      user.strafFristAuto = false;
+    }
+  }
+  if (typeof strafFristDelta === "number" && strafFristDelta !== 0) {
+    const base = user.strafFristBis || autoFristDate(new Date());
+    user.strafFristBis = addMonthsIsoDate(base, strafFristDelta);
+    user.strafFristAuto = false;
+  }
+  syncStrafFrist(user);
   db.save();
   res.json({ user: publicUser(user) });
 });
@@ -512,6 +577,7 @@ app.post("/api/users/:id/strafstunden", requireAuth, requireSupervisor, (req, re
       createdAt: new Date().toISOString(),
     });
   }
+  syncStrafFrist(user);
   db.save();
   res.json({ user: publicUser(user) });
 });

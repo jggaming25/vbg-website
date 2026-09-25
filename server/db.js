@@ -64,6 +64,8 @@ function ensureProtectedSupervisor() {
       robloxChangedAt: null,
       displayName: "",
       displayNameChangedAt: null,
+      strafFristBis: null,
+      strafFristAuto: true,
       language: "de",
       avatar: "",
       suspended: false,
@@ -137,6 +139,21 @@ function load() {
     if (!u.robloxChangedAt) u.robloxChangedAt = null;
     if (typeof u.displayName !== "string") u.displayName = "";
     if (!u.displayNameChangedAt) u.displayNameChangedAt = null;
+    if (u.strafFristBis === undefined) {
+      // Bestand: Nutzer, die bereits über 3 h sind, bekommen sofort ihre automatische Frist
+      if ((u.strafstunden || 0) >= 3) {
+        const d = new Date();
+        const y = d.getFullYear(), mo = d.getMonth();
+        const plus = new Date(y, mo + 1, d.getDate());
+        const day = plus.getMonth() !== ((mo + 1) % 12) ? new Date(y, mo + 2, 1) : plus;
+        const p = (n) => String(n).padStart(2, "0");
+        u.strafFristBis = day.getFullYear() + "-" + p(day.getMonth() + 1) + "-" + p(day.getDate());
+        u.strafFristAuto = true;
+      } else {
+        u.strafFristBis = null;
+        u.strafFristAuto = true;
+      }
+    }
     if (typeof u.language !== "string") u.language = "de";
     if (typeof u.avatar !== "string") u.avatar = "";
     delete u.fdl;

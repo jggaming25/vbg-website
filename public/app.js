@@ -97,6 +97,85 @@
     return sameDay ? hh + ":" + mm : date + " " + hh + ":" + mm;
   }
 
+  // ---------- Strafstunden-Frist ----------
+  function fmtFristDate(iso) {
+    if (!iso) return "";
+    const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
+    if (isNaN(d.getTime())) return String(iso);
+    return d.toLocaleDateString("de-DE");
+  }
+  function fristBisInfo(u) {
+    if (!u || !u.strafFristBis) return null;
+    const d = new Date(String(u.strafFristBis).slice(0, 10) + "T00:00:00");
+    if (isNaN(d.getTime())) return null;
+    const daysLeft = Math.ceil((d.getTime() - Date.now()) / 86400000);
+    return { iso: u.strafFristBis, daysLeft, expired: daysLeft < 0, manual: u.strafFristAuto === false };
+  }
+  function fristInfoText(u) {
+    const f = fristBisInfo(u);
+    const over3 = (u.strafstunden || 0) >= 3;
+    if (f) {
+      const d = f.daysLeft;
+      const tage = d === 1 ? "Tag" : "Tage";
+      return `<p><b>Frist zum Abarbeiten unter 3 h:</b> ${h(fmtFristDate(f.iso))}${f.expired ? ` <span class="badge red">abgelaufen</span> <span class="muted">bitte Supervisor kontaktieren</span>` : d === 0 ? ` <span class="badge red">läuft heute ab</span>` : ` <span class="muted">(${d} ${tage} verbleibend)</span>`}</p>`;
+    }
+    if (over3) return `<p class="muted">Du bist über 3 h – eine Frist sollte gesetzt sein. Bitte Supervisor kontaktieren.</p>`;
+    return `<p class="muted">Solange du unter 3 h bleibst, wird keine Frist gesetzt.</p>`;
+  }
+  function fristHtml(u) {
+    const f = fristBisInfo(u);
+    const over3 = (u.strafstunden || 0) >= 3;
+    if (!f) {
+      return `<div class="muted" style="font-size:11px;margin-top:2px">Frist: ${over3 ? "keine gesetzt" : "keine"}</div>`;
+    }
+    const tage = f.daysLeft === 1 ? "Tag" : "Tage";
+    return `<div style="font-size:11px;margin-top:4px;line-height:1.6">Frist: <b style="color:${f.expired ? "var(--red)" : "inherit"}">${h(fmtFristDate(f.iso))}</b>${f.expired ? ` <span class="badge red">abgelaufen</span>` : ` (${f.daysLeft} ${tage})`}${f.manual ? ` <span class="muted">manuell</span>` : ""}
+      <div class="flex" style="gap:4px;margin-top:2px">
+        <button class="btn btn-xs" onclick="VBG.fristMonate('${u.id}',+1)">+1 Mon</button>
+        <button class="btn btn-xs" onclick="VBG.fristMonate('${u.id}',-1)">−1 Mon</button>
+        <button class="btn btn-xs" onclick="VBG.fristSetzen('${u.id}')">Setzen…</button>
+        <button class="btn btn-xs" title="Frist entfernen" onclick="VBG.fristEntfernen('${u.id}')">✕</button>
+      </div></div>`;
+  }
+  async function fristMonate(id, delta) {
+    const r = await api("PATCH", "/api/users/" + id, { strafFristDelta: delta });
+    if (r.error) return toast(r.error, "err");
+    await loadUsers();
+    render();
+  }
+  async function fristEntfernen(id) {
+    const r = await api("PATCH", "/api/users/" + id, { strafFrist: null });
+    if (r.error) return toast(r.error, "err");
+    await loadUsers();
+    render();
+  }
+  async function fristSetzen(id) {
+    const cur = fristBisInfo((state.users || []).find((u) => u.id === id));
+    const d = document.createElement("div");
+    d.className = "modal-backdrop";
+    const val = cur ? cur.iso : new Date(Date.now() + 1000 * 60 * 60 * 24 * 31).toISOString().slice(0, 10);
+    d.innerHTML = `
+      <div class="modal">
+        <h2>Strafstunden-Frist festlegen</h2>
+        <label>Bis zum<input id="frist-date" type="date" value="${h(val)}"/></label>
+        <div class="muted" style="font-size:12px;margin-top:6px">Automatisch: +1 Monat ab Überschreiten von 3 h (31. → bis zum 01.). Unter 3 h wird die Frist automatisch entfernt.</div>
+        <div class="flex" style="margin-top:12px">
+          <button class="btn btn-green" onclick="VBG.fristSaveModal('${id}')">Übernehmen</button>
+          <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(d);
+  }
+  async function fristSaveModal(id) {
+    const inp = document.getElementById("frist-date");
+    if (!inp || !inp.value) return toast("Bitte ein Datum wählen", "err");
+    const r = await api("PATCH", "/api/users/" + id, { strafFrist: inp.value });
+    document.querySelectorAll(".modal-backdrop").forEach((m) => m.remove());
+    if (r.error) return toast(r.error, "err");
+    await loadUsers();
+    render();
+  }
+
   // ---------- Konstanten ----------
   const ROLE_LABELS = { supervisor: "Supervisor", senior: "Senior Busfahrer", user: "Busfahrer" };
   const VEHICLE_STATUS = {
@@ -348,6 +427,7 @@
             <div class="flex">
               <span>${h(u.username)}</span>
               <span class="badge red">${u.strafstunden} Strafstunden</span>
+              ${u.strafFristBis ? `<span class="badge ${fristBisInfo(u) && fristBisInfo(u).expired ? "red" : ""}">Frist ${h(fmtFristDate(u.strafFristBis))}</span>` : ""}
               <button class="btn btn-sm" onclick="VBG.setView('supervisor')">Nutzer-Tab öffnen</button>
             </div>`).join("")}
         </div>` : ""}
@@ -885,6 +965,7 @@
             <button class="btn btn-xs" onclick="VBG.strafe('${u.id}',-1)">−1</button>
             <button class="btn btn-xs" onclick="VBG.strafe('${u.id}',-0.5)">−0,5</button>
           </div>
+          ${fristHtml(u)}
         </td>
         <td>
           <button class="btn btn-ghost btn-xs" onclick="VBG.editUser('${u.id}')">Bearbeiten</button>
@@ -1056,6 +1137,15 @@
         ${prof && prof.linien && prof.linien.length ? `
           ${prof.linien.map((l) => `<span class="badge ${linieClsId(l.id)}" style="margin:0 8px 8px 0">${h(l.name)} – ${h(l.beschreibung || "")}</span>`).join("")}`
         : `<div class="muted">Noch keine Lizenzen zugewiesen.</div>`}
+      </div>
+
+      <div class="container" style="border-color:${(u.strafstunden || 0) >= 3 ? "var(--red)" : ""}">
+        <h2>Strafstunden &amp; Frist</h2>
+        <p>Aktuell: <b>${u.strafstunden || 0} h</b>
+          ${u.kündigung ? ` <span class="badge red">Kündigung droht</span>` : ""}
+          ${(u.strafstunden || 0) >= 3 ? ` <span class="badge red">Ab 3 h nur noch Kundenservice</span>` : ""}
+        </p>
+        ${fristInfoText(u)}
       </div>
 
       <div class="container">
@@ -1657,6 +1747,11 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
         </div>
         ${u.displayNameChangedAt ? `<p class="muted" style="margin:6px 0 0">Anzeigename-Sperre (1x/Monat) ist aktiv.
           <label class="checkline" style="margin-top:4px"><input id="eu-dnreset" type="checkbox"/> Sperre jetzt zurücksetzen</label></p>` : ""}
+        <fieldset><legend>Strafstunden-Frist</legend>
+          <label>Bis zum (manuell)<input id="eu-frist" type="date" value="${u.strafFristBis ? String(u.strafFristBis).slice(0, 10) : ""}"/>
+            <span class="muted" style="font-size:11px">Automatisch: +1 Monat ab Überschreiten von 3 h (31. → bis zum 01.); unter 3 h wird die Frist automatisch entfernt. Datum ändern = manuell verlängern/verkürzen.</span>
+          </label>
+        </fieldset>
         <fieldset><legend>Lizenzen</legend>
           ${state.cats.linien.map((l) => `<label class="checkline"><input type="checkbox" value="${l.id}" ${(u.linien || []).includes(l.id) ? "checked" : ""}> ${h(l.name)} – ${h(l.beschreibung || "")}</label>`).join("")}
         </fieldset>
@@ -1680,6 +1775,11 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     if (dnEl) body.displayName = dnEl.value;
     const dnReset = document.getElementById("eu-dnreset");
     if (dnReset && dnReset.checked) body.displayNameReset = true;
+    const fnEl = document.getElementById("eu-frist");
+    if (fnEl) {
+      const orig = ((state.users || []).find((x) => x.id === id) || {}).strafFristBis || "";
+      if (fnEl.value !== orig) body.strafFrist = fnEl.value || null;
+    }
     if (!document.getElementById("eu-protected-note")) {
       const linien = [];
       document.querySelectorAll("#user-form .checkline input:checked").forEach((c) => linien.push(c.value));
@@ -2046,6 +2146,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     addStandort, renameStandort, delStandort, kundenserviceSignup,
     signupActivity,
     showUserForm, createUser, copyPwResult, editUser, saveUserEdit, strafe, resetPw, toggleSuspend, deleteUser,
+    fristMonate, fristEntfernen, fristSetzen, fristSaveModal,
     showLinieForm, createLinie, editLinie, saveLinie, delLinie,
     addStopRow, removeStopRow,
     acceptApp, denyApp, delApp, acceptWish, denyWish,
