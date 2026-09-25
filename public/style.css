@@ -235,7 +235,7 @@ tr:last-child td { border-bottom: none; }
 .badge.gray { background: rgba(147,163,180,.15); color: var(--muted); }
 .badge.violet { background: rgba(167,139,250,.18); color: #c4b5fd; }
 
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-bottom: 16px; }
 .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; animation: fadeUp .18s ease; }
 .stat .num { font-size: 26px; font-weight: 700; }
 .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
