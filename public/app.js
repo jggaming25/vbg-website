@@ -282,7 +282,10 @@
     try {
       const r = await api("GET", "/api/shifts/" + state.planShiftId + "/duties");
       state.plan = r;
-    } catch (e) { state.plan = null; }
+    } catch (e) {
+      state.plan = null;
+      if (e && e.message && e.message.includes("404")) { state.planShiftId = null; }
+    }
   }
 
   async function loadFahrtenbuch() {
