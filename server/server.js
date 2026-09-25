@@ -846,7 +846,8 @@ function defaultStopsForLinie(data, name, linieId) {
     if (linieId && d.linieId === linieId) return true;
     const dn = (d.name || "").trim().toLowerCase();
     if (!wanted) return false;
-    return dn === wanted || dn.indexOf(wanted + " ") === 0 || dn.indexOf(wanted) === 0;
+    // Match by line name in duty name (e.g., "19" in "19 Kurs 1" or "19" in "Duty 1" with lin19)
+    return dn === wanted || dn.indexOf(wanted + " ") === 0 || dn.indexOf(wanted) === 0 || (d.linieId && data.linien.find(l => l.id === d.linieId && (l.name || "").toLowerCase().indexOf(wanted) === 0));
   });
 
   const map = new Map();
