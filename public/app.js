@@ -55,6 +55,7 @@
     nav_anmeldung: ["Anmeldung", "Sign up"],
     nav_activity: ["Activity", "Activity"],
     nav_fahrtenbuch: ["Fahrtenbuch", "Logbook"],
+    nav_fahrzeuge: ["Fahrzeuge", "Vehicles"],
     nav_supervisor: ["Supervisor", "Supervisor"],
     nav_account: ["Account", "Account"],
   };
@@ -412,6 +413,7 @@
       { id: "anmeldung", label: t("nav_anmeldung") },
       { id: "activity", label: t("nav_activity") },
       { id: "fahrtenbuch", label: t("nav_fahrtenbuch") },
+      { id: "fahrzeuge", label: t("nav_fahrzeuge") },
     ];
     if (isSup()) tabs.push({ id: "supervisor", label: t("nav_supervisor") });
     const links = tabs
@@ -478,6 +480,7 @@
       case "anmeldung": return renderAnmeldung();
       case "activity": return renderActivity();
       case "fahrtenbuch": return renderFahrtenbuch();
+      case "fahrzeuge": return renderFahrzeuge();
       case "supervisor": return renderSupervisor();
       case "account": return renderAccount();
       default: return renderDashboard();
@@ -491,7 +494,9 @@
     const fzEinsatz = state.cats.fahrzeuge.filter((f) => f.status === "einsatzbereit").length;
     const shiftsReal = realShifts();
     const kuendigung = state.users.filter((u) => u.kündigung && !u.suspended);
-    const offeneApps = [];
+    
+    // Offene Anmeldungen zählen
+    const offeneApps = state.applications ? state.applications.filter((a) => a.status === "pending").length : 0;
 
     return `
       <h2>Übersicht</h2>
@@ -500,7 +505,7 @@
         <div class="stat"><div class="num">${aktive}</div><div class="lbl">Aktive Nutzer</div></div>
         <div class="stat"><div class="num">${fzGesamt}</div><div class="lbl">Fahrzeuge</div>
           <div class="lbl">${fzEinsatz} einsatzbereit</div></div>
-        ${isSup() ? `<div class="stat"><div class="num">${offeneApps.length ? "–" : "–"}</div><div class="lbl">Anmeldungen</div></div>` : ""}
+        ${isSup() ? `<div class="stat"><div class="num">${offeneApps}</div><div class="lbl">Offene Anmeldungen</div></div>` : ""}
       </div>
 
       ${isSup() && kuendigung.length ? `
@@ -532,7 +537,7 @@
     const rows = items.length ? items.map((x) => `
       <tr>
         <td class="muted" style="white-space:nowrap">${h(fmtTimestamp(x))}</td>
-        <td>${h(x.actor || "?")}</td>
+        <td>${h(x.actorName || x.actor || "?")}</td>
         <td><b>${h(x.action || "")}</b></td>
         <td>${h(x.detail || "")}</td>
       </tr>`).join("")
@@ -770,6 +775,10 @@
               ${d.assignedUsername ? ` · Fahrer: <b>${h(d.assignedUsername)}</b>` : ""}
             </div>
             ${d.bemerkung ? `<div class="duty-meta" style="color:var(--yellow)">⚠ ${h(d.bemerkung)}</div>` : ""}
+            ${d.linienwechsel ? (() => {
+              const [ort, zeit] = d.linienwechsel.split("|");
+              return `<div class="duty-meta" style="color:var(--sky)"><b>Linienwechsel:</b> ${h(ort || "–")} ${zeit ? "um " + h(zeit) : ""}</div>`;
+            })() : ""}
           </div>
           ${isSup_ ? `<div class="flex">
               ${assoz}
@@ -979,15 +988,43 @@
       return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
     }
     const bereit = me.fahrMin >= 60;
-    const MOENTLICHES_ZIEL = 240; // mind. 4 h gefahrene Zeit pro Kalendermonat
+    const MOENTLICHES_ZIEL = 240;
     const monFahr = month.fahrMin || 0;
     const monOk = monFahr >= MOENTLICHES_ZIEL;
     const monRest = Math.max(0, MOENTLICHES_ZIEL - monFahr);
+
+    // Anmelde-Deadline basierend auf Shiftplan
+    let deadlineHtml = "";
+    if (state.shifts) {
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      const upcomingShifts = state.shifts.shifts.filter((s) => {
+        if (!s.date) return false;
+        return s.date >= today && !s.cancelled;
+      }).sort((a, b) => (a.date + " " + (a.startTime || "")).localeCompare(b.date + " " + (b.startTime || "")));
+      if (upcomingShifts.length) {
+        const nextShift = upcomingShifts[0];
+        const shiftDate = nextShift.date;
+        const shiftStart = nextShift.startTime || "00:00";
+        const deadline = new Date(shiftDate + "T" + shiftStart);
+        const diffMs = deadline - now;
+        if (diffMs > 0) {
+          const hours = Math.floor(diffMs / 3600000);
+          const mins = Math.floor((diffMs % 3600000) / 60000);
+          deadlineHtml = `<div class="stat"><div class="num">${h(shiftDate)} ${h(shiftStart)}</div><div class="lbl">Nächster Shift (Anmelde-Deadline)</div></div>`;
+        }
+      }
+    }
+
+    // Reine Fahrzeit lt. Shiftplan (bereits in me.fahrMin enthalten)
+    const shiftplanFahrMin = me.fahrMin || 0;
+
     return `
       <h2>Activity</h2>
       <div class="card-grid">
         <div class="stat"><div class="num">${fmtMin(me.activityMin || 0)}</div><div class="lbl">Activity-Zeit (60 % deiner Fahrzeit)</div></div>
-        <div class="stat"><div class="num">${fmtMin(me.fahrMin || 0)}</div><div class="lbl">Reine Fahrzeit (ohne Pausen)</div></div>
+        <div class="stat"><div class="num">${fmtMin(shiftplanFahrMin)}</div><div class="lbl">Reine Fahrzeit lt. Shiftplan</div></div>
+        ${deadlineHtml}
         <div class="stat"><div class="num">${(me.signups || []).length}</div><div class="lbl">Activity-Anmeldungen</div></div>
         <div class="stat"><div class="num" style="color:${monOk ? "var(--green)" : "var(--yellow)"}">${monOk ? "✓ " + fmtMin(monFahr) : fmtMin(monFahr)}</div>
           <div class="lbl">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)${monOk ? " – erreicht" : ` – noch ${fmtMin(monRest)}`}</div></div>
@@ -1221,6 +1258,155 @@
     if (!confirm("Fahrtenbuch-Eintrag wirklich löschen?" + (e ? "\n" + e.datum + " – " + (e.fahrername || "") : ""))) return;
     try { await api("DELETE", "/api/fahrtenbuch/" + id); toast("Eintrag gelöscht", "ok"); await loadFahrtenbuch(); render(); }
     catch (er) { toast(er.message, "err"); }
+  }
+
+  // ---------- Fahrzeuge ----------
+  async function loadFahrzeuge() {
+    try {
+      const r = await api("GET", "/api/fahrzeuge");
+      state.fahrzeuge = r.items || [];
+    } catch (e) { state.fahrzeuge = []; }
+  }
+
+  function renderFahrzeuge() {
+    const fzs = state.fahrzeuge || [];
+    const canEdit = isSup();
+    return `
+      <h2>Fahrzeugübersicht</h2>
+      ${canEdit ? `
+        <div class="container">
+          <h3>Neues Fahrzeug anlegen</h3>
+          <div class="form-grid" style="margin-bottom:16px">
+            <label>Wagennummer<input id="fz-wagennummer" placeholder="z. B. 123"/></label>
+            <label>Kennzeichen<input id="fz-kennzeichen" placeholder="z. B. B-VB 1234"/></label>
+            <label>Typ<select id="fz-typ">
+              <option value="Bus">Bus</option>
+              <option value="Sonderfahrzeug">Sonderfahrzeug</option>
+              <option value="Ersatzwagen">Ersatzwagen</option>
+              <option value="Fahrschule">Fahrschule</option>
+              <option value="Reserve">Reserve</option>
+            </select></label>
+            <label>Status<select id="fz-status">
+              <option value="einsatzbereit">Einsatzbereit</option>
+              <option value="nicht_einsatzbereit">Nicht einsatzbereit</option>
+              <option value="sonderfahrzeug">Sonderfahrzeug</option>
+              <option value="ersatzwagen">Ersatzwagen</option>
+              <option value="fahrschule">Fahrschule</option>
+              <option value="reserve">Reserve</option>
+            </select></label>
+            <label>Ort<input id="fz-ort" placeholder="z. B. Betriebshof"/></label>
+            <label>Bemerkung<input id="fz-bemerkung" placeholder="Optional"/></label>
+          </div>
+          <button class="btn btn-green" onclick="VBG.createFahrzeug()">Fahrzeug anlegen</button>
+        </div>
+      ` : ""}
+      <div class="container">
+        <table>
+          <thead><tr>
+            <th>Wagennummer</th><th>Kennzeichen</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
+            ${canEdit ? `<th>Aktionen</th>` : ""}
+          </tr></thead>
+          <tbody>
+            ${fzs.length ? fzs.map((f) => `
+              <tr>
+                <td>${h(f.wagennummer || "–")}</td>
+                <td>${h(f.kennzeichen || "–")}</td>
+                <td>${h(f.typ || "–")}</td>
+                <td><span class="badge ${(VEHICLE_STATUS[f.status] || {}).cls || "gray"}">${h((VEHICLE_STATUS[f.status] || {}).label || f.status)}</span></td>
+                <td>${h(f.ort || "–")}</td>
+                <td>${h(f.bemerkung || "–")}</td>
+                ${canEdit ? `<td>
+                  <button class="btn btn-ghost btn-xs" onclick="VBG.editFahrzeug('${f.id}')">Bearbeiten</button>
+                  <button class="btn btn-danger btn-xs" onclick="VBG.deleteFahrzeug('${f.id}')">Löschen</button>
+                </td>` : ""}
+              </tr>
+            `).join("") : `<tr><td colspan="7" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div id="fz-form"></div>`;
+  }
+
+  function createFahrzeug() {
+    const body = {
+      wagennummer: document.getElementById("fz-wagennummer").value.trim(),
+      kennzeichen: document.getElementById("fz-kennzeichen").value.trim(),
+      typ: document.getElementById("fz-typ").value,
+      status: document.getElementById("fz-status").value,
+      ort: document.getElementById("fz-ort").value.trim(),
+      bemerkung: document.getElementById("fz-bemerkung").value.trim(),
+    };
+    if (!body.wagennummer) { toast("Wagennummer fehlt", "err"); return; }
+    api("POST", "/api/fahrzeuge", body)
+      .then(() => { toast("Fahrzeug angelegt", "ok"); document.getElementById("fz-form").innerHTML = ""; return loadFahrzeuge(); })
+      .then(() => render())
+      .catch((e) => toast(e.message, "err"));
+  }
+
+  function editFahrzeug(id) {
+    const f = state.fahrzeuge.find((x) => x.id === id);
+    if (!f) return;
+    const el = document.getElementById("fz-form");
+    if (!el) return;
+    el.innerHTML = `
+      <div class="container">
+        <h3>Fahrzeug bearbeiten</h3>
+        <div class="form-grid">
+          <label>Wagennummer<input id="fz-wagennummer" value="${h(f.wagennummer)}"/></label>
+          <label>Kennzeichen<input id="fz-kennzeichen" value="${h(f.kennzeichen)}"/></label>
+          <label>Typ<select id="fz-typ">
+            <option value="Bus" ${f.typ === "Bus" ? "selected" : ""}>Bus</option>
+            <option value="Sonderfahrzeug" ${f.typ === "Sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
+            <option value="Ersatzwagen" ${f.typ === "Ersatzwagen" ? "selected" : ""}>Ersatzwagen</option>
+            <option value="Fahrschule" ${f.typ === "Fahrschule" ? "selected" : ""}>Fahrschule</option>
+            <option value="Reserve" ${f.typ === "Reserve" ? "selected" : ""}>Reserve</option>
+          </select></label>
+          <label>Status<select id="fz-status">
+            <option value="einsatzbereit" ${f.status === "einsatzbereit" ? "selected" : ""}>Einsatzbereit</option>
+            <option value="nicht_einsatzbereit" ${f.status === "nicht_einsatzbereit" ? "selected" : ""}>Nicht einsatzbereit</option>
+            <option value="sonderfahrzeug" ${f.status === "sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
+            <option value="ersatzwagen" ${f.status === "ersatzwagen" ? "selected" : ""}>Ersatzwagen</option>
+            <option value="fahrschule" ${f.status === "fahrschule" ? "selected" : ""}>Fahrschule</option>
+            <option value="reserve" ${f.status === "reserve" ? "selected" : ""}>Reserve</option>
+          </select></label>
+          <label>Ort<input id="fz-ort" value="${h(f.ort)}"/></label>
+          <label>Bemerkung<input id="fz-bemerkung" value="${h(f.bemerkung)}"/></label>
+        </div>
+        <div class="flex" style="margin-top:10px">
+          <button class="btn btn-green" onclick="VBG.saveFahrzeug('${id}')">Speichern</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('fz-form').innerHTML=''">Abbrechen</button>
+        </div>
+      </div>`;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+
+  async function saveFahrzeug(id) {
+    const body = {
+      wagennummer: document.getElementById("fz-wagennummer").value.trim(),
+      kennzeichen: document.getElementById("fz-kennzeichen").value.trim(),
+      typ: document.getElementById("fz-typ").value,
+      status: document.getElementById("fz-status").value,
+      ort: document.getElementById("fz-ort").value.trim(),
+      bemerkung: document.getElementById("fz-bemerkung").value.trim(),
+    };
+    if (!body.wagennummer) { toast("Wagennummer fehlt", "err"); return; }
+    try {
+      await api("PATCH", "/api/fahrzeuge/" + id, body);
+      document.getElementById("fz-form").innerHTML = "";
+      toast("Gespeichert", "ok");
+      await loadFahrzeuge();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function deleteFahrzeug(id) {
+    if (!confirm("Fahrzeug wirklich löschen?")) return;
+    try {
+      await api("DELETE", "/api/fahrzeuge/" + id);
+      toast("Fahrzeug gelöscht", "ok");
+      await loadFahrzeuge();
+      render();
+    } catch (e) { toast(e.message, "err"); }
   }
 
   // ---------- Supervisor ----------
@@ -1555,12 +1741,16 @@
       <div class="container">
         <div class="spread">
           <div><h2 style="margin:0">Desktop-Benachrichtigungen</h2>
-            <span class="muted">${desktopEnabled() ? "Aktiv" : "Aus"}</span></div>
+            <span class="muted">${desktopEnabled() ? "Aktiv" : "Aus"}</span>
+            <span class="muted" style="margin-left:8px">
+              ${Notification.permission === "granted" ? '✓ Erlaubt' : Notification.permission === "denied" ? '✗ Verweigert (in Browser-Einstellungen ändern)' : '? Noch nicht gefragt'}
+            </span></div>
           <button class="btn ${desktopEnabled() ? "btn-yellow" : "btn-green"}" onclick="VBG.toggleDesktop()">
             ${desktopEnabled() ? "Deaktivieren" : "Aktivieren"}
           </button>
         </div>
         <p class="muted">Erhalte jede Benachrichtigung (Anmeldungen, Zuteilungen, Strafstunden, Ansagen …) auch als System-Benachrichtigung – egal ob die Website offen ist oder nicht.</p>
+        ${Notification.permission !== "granted" ? `<p class="muted" style="color:var(--yellow)"><b>Hinweis:</b> Damit Benachrichtigungen funktionieren, muss im Browser <b>„Benachrichtigungen zulassen“</b> aktiviert sein (🔒 Symbol in der Adressleiste → Benachrichtigungen → Zulassen).</p>` : ""}
       </div>
 
       <div class="container">
@@ -1761,7 +1951,10 @@
 
   async function bootstrapAfterLogin() {
     await refreshAll();
-    if (isSup()) await loadUsers();
+    if (isSup()) {
+      await loadUsers();
+      await loadAppsAll();
+    }
     await loadNotifs();
     await loadKundenservice();
     await checkAnnouncements();
@@ -1777,6 +1970,7 @@
     if (v === "anmeldung") { /* */ }
     if (v === "supervisor" && isSup()) { loadUsers().then(() => { loadAppsAll(); render(); }); return; }
     if (v === "fahrtenbuch") { loadFahrtenbuch().then(() => render()); return; }
+    if (v === "fahrzeuge") { loadFahrzeuge().then(() => render()); return; }
     if (v === "account") { loadProfile().then(() => render()); return; }
     state.notifOpen = false;
     render();
@@ -1903,14 +2097,48 @@
   }
   function editDutyTimes(dutyId) {
     const d = state.plan.duties.find((x) => x.id === dutyId);
-    const s = prompt("Duty-Anfang (HH:MM), z. B. " + (d.startTime || "05:00"), d.startTime || "");
-    if (s === null) return;
-    const e = prompt("Duty-Ende (HH:MM), z. B. " + (d.endTime || "21:00"), d.endTime || "");
-    if (e === null) return;
-    api("PATCH", "/api/duties/" + dutyId, { startTime: s, endTime: e })
-      .then(() => { toast("Zeiten angepasst", "ok"); return loadPlan(); })
-      .then(() => render())
-      .catch((er) => toast(er.message, "err"));
+    if (!d) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-backdrop";
+    const curStart = d.startTime || "";
+    const curEnd = d.endTime || "";
+    const curLw = d.linienwechsel || "";
+    let lwOrt = "", lwZeit = "";
+    if (curLw) {
+      const parts = curLw.split("|");
+      lwOrt = parts[0] || "";
+      lwZeit = parts[1] || "";
+    }
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:480px">
+        <h2>Duty Zeiten & Linienwechsel</h2>
+        <div class="form-grid">
+          <label>Duty-Start<input id="ed-start" type="time" value="${h(curStart)}"/></label>
+          <label>Duty-Ende<input id="ed-end" type="time" value="${h(curEnd)}"/></label>
+          <label>Linienwechsel Ort<input id="ed-lw-ort" type="text" value="${h(lwOrt)}" placeholder="z. B. Hbf, Betriebshof"/></label>
+          <label>Linienwechsel Zeit<input id="ed-lw-zeit" type="time" value="${h(lwZeit)}"/></label>
+        </div>
+        <div class="flex" style="margin-top:12px">
+          <button class="btn btn-green" onclick="VBG.saveDutyTimesExt('${dutyId}')">Speichern</button>
+          <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  async function saveDutyTimesExt(dutyId) {
+    const start = document.getElementById("ed-start").value;
+    const end = document.getElementById("ed-end").value;
+    const lwOrt = document.getElementById("ed-lw-ort").value.trim();
+    const lwZeit = document.getElementById("ed-lw-zeit").value;
+    const linienwechsel = (lwOrt || lwZeit) ? (lwOrt + "|" + lwZeit) : "";
+    try {
+      await api("PATCH", "/api/duties/" + dutyId, { startTime: start, endTime: end, linienwechsel });
+      document.querySelector(".modal-backdrop").remove();
+      toast("Zeiten & Linienwechsel gespeichert", "ok");
+      await loadPlan(); render();
+    } catch (e) { toast(e.message, "err"); }
   }
   async function toggleDutyCancel(dutyId) {
     const d = state.plan.duties.find((x) => x.id === dutyId);
@@ -2190,8 +2418,14 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   }
   async function toggleSuspend(id) {
     const u = state.users.find((x) => x.id === id);
-    try { await api("PATCH", "/api/users/" + id, { suspended: !u.suspended }); await loadUsers(); render(); }
-    catch (e) { toast(e.message, "err"); }
+    const newSuspended = !u.suspended;
+    const action = newSuspended ? "gesperrt" : "entsperrt";
+    try {
+      await api("PATCH", "/api/users/" + id, { suspended: newSuspended });
+      toast(`Nutzer ${u.username} wurde ${action}`, "ok");
+      await loadUsers();
+      render();
+    } catch (e) { toast(e.message, "err"); }
   }
   async function deleteUser(id) {
     if (!confirm("Nutzer wirklich löschen?")) return;
@@ -2543,7 +2777,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
-    loadFahrtenbuch, loadSuperLog,
+    loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug,
   };
 
   init();

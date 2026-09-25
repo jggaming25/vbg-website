@@ -461,6 +461,7 @@ function enrichDuty(d) {
     fahrSummeMin: dauer.fahrSumme,
     spanneMin: dauer.spanne,
     pausenMin: dauer.pausen,
+    linienwechsel: d.linienwechsel || null,
   };
 }
 
@@ -1695,12 +1696,23 @@ app.delete("/api/applications/:id", requireAuth, requireSupervisor, (req, res) =
   res.json({ ok: true });
 });
 
-// Meine eigene Anmeldung zurückziehen (falls noch pending)
+// Meine eigene Anmeldung zurückziehen (falls noch pending, bis max. 24h vor Shift-Start)
 app.delete("/api/my/applications/:id", requireAuth, (req, res) => {
   const data = db.load();
   const a = data.applications.find((x) => x.id === req.params.id && x.userId === req.user.id);
   if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
   if (a.status !== "pending") return res.status(400).json({ error: "Nur ausstehende Anmeldungen zurückziehbar" });
+  // Prüfen: Shift-Start liegt mehr als 24h in der Zukunft?
+  const shift = data.shifts.find((s) => s.id === a.shiftId);
+  if (shift && shift.date && shift.startTime) {
+    const shiftStart = new Date(shift.date + "T" + shift.startTime);
+    const now = new Date();
+    const diffMs = shiftStart - now;
+    const diffHours = diffMs / 3600000;
+    if (diffHours <= 24) {
+      return res.status(400).json({ error: `Rückzug nur bis 24h vor Shift-Start möglich (Shift beginnt ${shift.date} ${shift.startTime})` });
+    }
+  }
   data.applications = data.applications.filter((x) => x.id !== req.params.id);
   db.save();
   res.json({ ok: true });
