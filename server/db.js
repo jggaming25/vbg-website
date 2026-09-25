@@ -36,6 +36,7 @@ function emptyStore() {
     activity: [], // Activity-Anmeldungen
     notifications: [],
     announcements: [], // Broadcast-Nachrichten (Supervisor → Zielgruppen)
+    pushSubscriptions: [], // Web-Push-Abonnements (Browser-Push-Targets pro Nutzer)
     announcementDate: null,
   };
 }
@@ -116,6 +117,27 @@ function load() {
     console.error("Daten konnten nicht geladen werden:", e.message);
     db = emptyStore();
   }
+  shapeAndMigrate(db);
+  return db;
+}
+
+// Übernimmt eine (z. B. vom Remote-Branch geholte) Datenbank und sichert alle Felder/Migrationen.
+function applyRemoteDb(remote) {
+  if (!remote || typeof remote !== "object") return false;
+  db = remote;
+  shapeAndMigrate(db);
+  // Lokalen Cache schreiben, damit der Server auch ohne Netz wieder diese Daten hat.
+  const tmp = DATA_FILE + ".tmp";
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf8");
+    fs.renameSync(tmp, DATA_FILE);
+  } catch (e) {
+    console.error("Remote-DB konnte nicht lokal gecacht werden:", e.message);
+  }
+  return true;
+}
+
+function shapeAndMigrate(db) {
   // Feldsicherung (auch für Daten aus älteren Versionen)
   if (!db.users) db.users = [];
   if (!db.linien) db.linien = [];
@@ -128,6 +150,7 @@ function load() {
   if (!db.activity) db.activity = [];
   if (!db.notifications) db.notifications = [];
   if (!db.announcements) db.announcements = [];
+  if (!db.pushSubscriptions) db.pushSubscriptions = [];
   if (db.announcementDate === undefined) db.announcementDate = null;
 
   // Migration älterer Felder
@@ -191,7 +214,6 @@ function load() {
 
   ensureDefaultCatalogs();
   ensureProtectedSupervisor();
-  return db;
 }
 
 function save() {
@@ -200,6 +222,118 @@ function save() {
   const tmp = DATA_FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(db, null, 2), "utf8");
   fs.renameSync(tmp, DATA_FILE);
+  scheduleAutoCommit();
+}
+
+// ---------------------------------------------------------------------------
+// Persistenz über GitHub: Der Server speichert einen zusätzlichen Snapshot
+// im Branch "data" (data.json). Dadurch überleben alle Änderungen (Profil,
+// Avatare, Shifts, Anmeldungen …) jeden Neustart/Deploy auf Render.
+// Nur aktiv, wenn RENDER=true und VBG_GITHUB_TOKEN gesetzt ist.
+// ---------------------------------------------------------------------------
+const GH_OWNER = "jggaming25";
+const GH_REPO = "vbg-website";
+const GH_DATA_BRANCH = "data";
+
+function remoteDbEnabled() {
+  return process.env.RENDER === "true" && !!process.env.VBG_GITHUB_TOKEN;
+}
+
+// Remote laden ist öffentlich (raw) möglich, daher auch ohne Token nutzbar.
+async function fetchRemoteDb() {
+  try {
+    const url = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_DATA_BRANCH}/data.json`;
+    const res = await fetch(url, { headers: { "Cache-Control": "no-cache", Pragma: "no-cache" } });
+    if (!res.ok) return null;
+    const obj = JSON.parse(await res.text());
+    return obj && typeof obj === "object" ? obj : null;
+  } catch (e) {
+    console.error("Remote-DB konnte nicht geladen werden:", e.message);
+    return null;
+  }
+}
+
+let commitTimer = null;
+let commitChain = Promise.resolve();
+let lastCommitHash = "";
+const AUTO_COMMIT_DEBOUNCE_MS = 3000;
+
+function scheduleAutoCommit() {
+  if (!remoteDbEnabled()) return;
+  if (commitTimer) clearTimeout(commitTimer);
+  commitTimer = setTimeout(() => {
+    commitTimer = null;
+    runAutoCommit();
+  }, AUTO_COMMIT_DEBOUNCE_MS);
+}
+
+function contentHash(content) {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function runAutoCommit() {
+  const content = JSON.stringify(db, null, 2);
+  const h = contentHash(content);
+  if (h === lastCommitHash) return;
+  commitChain = commitChain.then(() => doCommit(content, h)).catch((e) => console.error("Auto-Commit fehlgeschlagen:", e.message));
+}
+
+function ghHeaders(token) {
+  return {
+    Authorization: "Bearer " + token,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "vbg-website",
+  };
+}
+
+async function doCommit(content, h) {
+  const token = process.env.VBG_GITHUB_TOKEN;
+  if (!token) return;
+  const base = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/data.json`;
+  const headers = ghHeaders(token);
+
+  // Aktuellen SHA lesen (Grundlage für den Update-PUT)
+  const getRes = await fetch(base + "?ref=" + GH_DATA_BRANCH, { headers });
+  let sha = null;
+  if (getRes.ok) {
+    const meta = await getRes.json();
+    sha = meta.sha;
+  } else if (getRes.status !== 404) {
+    throw new Error("SHA-Read fehlgeschlagen: " + getRes.status);
+  }
+
+  let putRes = await fetch(base, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      branch: GH_DATA_BRANCH,
+      message: "Daten-Snapshot " + new Date().toISOString(),
+      content: Buffer.from(content, "utf8").toString("base64"),
+      ...(sha ? { sha } : {}),
+    }),
+  });
+
+  // Parallel-Änderung → einmal frisch lesen und erneut speichern
+  if (!putRes.ok && putRes.status === 422 && sha) {
+    const again = await fetch(base + "?ref=" + GH_DATA_BRANCH, { headers });
+    const meta = await again.json();
+    putRes = await fetch(base, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch: GH_DATA_BRANCH,
+        message: "Daten-Snapshot " + new Date().toISOString(),
+        content: Buffer.from(content, "utf8").toString("base64"),
+        sha: meta.sha,
+      }),
+    });
+  }
+
+  if (!putRes.ok) {
+    const body = await putRes.text();
+    throw new Error("PUT fehlgeschlagen: " + putRes.status + " " + body.slice(0, 300));
+  }
+  lastCommitHash = h;
 }
 
 // Importiert den wiederverwendbaren Tagesplan aus seed/duties.json.
@@ -280,4 +414,7 @@ module.exports = {
   isProtected,
   protectedUsername,
   DEFAULT_LINIEN,
+  remoteDbEnabled,
+  fetchRemoteDb,
+  applyRemoteDb,
 };

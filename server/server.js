@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const crypto = require("crypto");
+const webpush = require("web-push");
 const db = require("./db");
 
 const app = express();
@@ -13,10 +14,30 @@ app.use(express.json({ limit: "10mb" }));
 const SECRET = process.env.JWT_SECRET || "vbg-website-dev-secret-bitte-in-env-setzen-123456";
 const TOKEN_TIMEOUT = { normal: "12h", remember: "30d" };
 
-db.load();
+async function boot() {
+  db.load();
+  try { ensureVapidKeys(); } catch (e) { console.error("VAPID-Setup fehlgeschlagen:", e.message); }
 
-const seedCount = db.importDutiesFromFile(process.env.SEED_FILE);
-if (seedCount) console.log(`Seed: ${seedCount} Tagesplan-Dutys importiert (${process.env.SEED_FILE}).`);
+  // Persistenz: Bei jedem Start die zuletzt gespeicherte Remote-DB (GitHub-Branch "data") nachladen,
+  // damit Profil/Profilbilder/Shifts/Anmeldungen jeden Deploy überleben.
+  if (db.remoteDbEnabled()) {
+    try {
+      const remote = await db.fetchRemoteDb();
+      if (remote && db.applyRemoteDb(remote)) {
+        console.log(`Remote-DB geladen (${(remote.users || []).length} Nutzer, Branch data).`);
+      } else {
+        console.log("Keine Remote-DB verfügbar – nutze lokale data.json.");
+      }
+    } catch (e) {
+      console.error("Remote-DB Fehler:", e.message);
+    }
+  }
+
+  const seedCount = db.importDutiesFromFile(process.env.SEED_FILE);
+  if (seedCount) console.log(`Seed: ${seedCount} Tagesplan-Dutys importiert (${process.env.SEED_FILE}).`);
+}
+
+module.exports = { boot };
 
 // ---------- Rollen ----------
 const ROLE_LABELS = {
@@ -154,6 +175,70 @@ function syncStrafFrist(user) {
   }
 }
 
+// ---------- System-/Desktop-Benachrichtigungen (Web Push) ----------
+const PUSH_SUBJECT = "mailto:admin@vbg-website.local";
+
+function ensureVapidKeys() {
+  const data = db.load();
+  const envPublic = process.env.VBG_VAPID_PUBLIC_KEY;
+  const envPrivate = process.env.VBG_VAPID_PRIVATE_KEY;
+  let pub = envPublic;
+  let priv = envPrivate;
+  if (envPublic && envPrivate) {
+    webpush.setVapidDetails(PUSH_SUBJECT, envPublic, envPrivate);
+    return { publicKey: envPublic };
+  }
+  if (!pub || !priv) {
+    if (data._vapid && data._vapid.publicKey && data._vapid.privateKey) {
+      pub = data._vapid.publicKey;
+      priv = data._vapid.privateKey;
+    } else {
+      const keys = webpush.generateVAPIDKeys();
+      pub = keys.publicKey;
+      priv = keys.privateKey;
+      data._vapid = { publicKey: pub, privateKey: priv };
+      db.save();
+    }
+  }
+  webpush.setVapidDetails(PUSH_SUBJECT, pub, priv);
+  return { publicKey: pub };
+}
+
+function subKey(s) {
+  return s.endpoint + "|" + s.keys.p256dh;
+}
+
+function pushToSubs(subs, title, body, url) {
+  (subs || []).forEach((s) => {
+    if (!s || !s.endpoint || !s.keys || !s.keys.p256dh) return;
+    webpush.sendNotification(s, JSON.stringify({ title: title || "VBG Orga", body: body || "", url: url || "/" }))
+      .catch((err) => {
+        // Abonnement nicht mehr gültig (nutzer deaktiviert / Browser)/gerätesperre → entfernen
+        if (err && (err.statusCode === 404 || err.statusCode === 410)) {
+          const d = db.load();
+          d.pushSubscriptions = (d.pushSubscriptions || []).filter((x) => subKey(x) !== subKey(s));
+          db.save();
+        }
+      });
+  });
+}
+
+function pushToUser(userId, title, body, url) {
+  const d = db.load();
+  const subs = (d.pushSubscriptions || []).filter((x) => x.userId === userId);
+  if (subs.length) pushToSubs(subs, title, body, url);
+}
+
+function pushTitleFor(type) {
+  switch (type) {
+    case "apply": return "Neue Anmeldung";
+    case "success": return "Mitteilung";
+    case "warning": return "Warnung";
+    case "announce": return "Ansage vom Supervisor";
+    default: return "VBG Orga";
+  }
+}
+
 function notify(userId, message, type) {
   const data = db.load();
   data.notifications.push({
@@ -165,6 +250,7 @@ function notify(userId, message, type) {
     createdAt: new Date().toISOString(),
   });
   db.save();
+  pushToUser(userId, pushTitleFor(type), message);
 }
 
 function notifyAll(message, type) {
@@ -180,6 +266,9 @@ function notifyAll(message, type) {
     read: false, createdAt: new Date().toISOString(),
   });
   db.save();
+  const subs = (data.pushSubscriptions || [])
+    .filter((x) => data.users.find((u) => u.id === x.userId));
+  pushToSubs(subs, pushTitleFor(type), message);
 }
 
 function effectiveVehicle(duty) {
@@ -758,6 +847,60 @@ function tagesplanShift(data) {
   return data.shifts.find((s) => s.id === "tpl-tagesplan");
 }
 
+// ---------- Dutys auf die Shift-Zeit zuschneiden ----------
+function toMin(hhmm) {
+  if (typeof hhmm !== "string" || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+  const p = hhmm.split(":");
+  return Number(p[0]) * 60 + Number(p[1]);
+}
+function tripKey(t) {
+  return [t.dep, t.arr, t.from, t.to, t.leerfahrt ? "L" : "F"].join("|");
+}
+function tripInWindow(t, sMin, eMin) {
+  const dep = toMin(t && t.dep);
+  if (dep === null) return true; // keine/ungültige Zeit → nicht schneiden
+  if (sMin !== null && dep < sMin) return false;
+  if (eMin !== null && dep > eMin) return false;
+  return true;
+}
+function cloneTrip(t) {
+  return {
+    ...t, id: uid(), vehicleId: null, assignedUserId: null,
+    cancelled: false, cancelNote: "", bemerkung: "",
+    stops: (t.stops || []).map((s) => ({ ...s, id: uid(), cancelled: false })),
+  };
+}
+function recomputeDutyTimes(duty) {
+  const trips = (duty.trips || []).slice().sort((a, b) => (toMin(a.dep) || 0) - (toMin(b.dep) || 0));
+  if (trips.length) {
+    duty.startTime = trips[0].dep;
+    duty.endTime = trips[trips.length - 1].arr;
+  } else {
+    duty.startTime = "";
+    duty.endTime = "";
+  }
+}
+// Bei Neuanlage/Kopie: frisch kopierte Fahrten auf das Shift-Zeitfenster beschränken
+function cutDutyToShiftTimes(duty, shift) {
+  const sMin = toMin(shift.startTime || "");
+  const eMin = toMin(shift.endTime || "");
+  if (sMin === null && eMin === null) return;
+  duty.trips = (duty.trips || []).filter((t) => tripInWindow(t, sMin, eMin));
+  recomputeDutyTimes(duty);
+}
+// Bei geänderter Shift-Zeit: vorhandene Fahrten im Fenster behalten (Edits bleiben),
+// außerhalb liegende entfernen und (bei Verlängerung) fehlende Tagesplan-Fahrten ergänzen.
+function syncDutyToShiftTimes(duty, tplDuty, sMin, eMin) {
+  if (sMin === null && eMin === null) return;
+  const keep = (duty.trips || []).filter((t) => tripInWindow(t, sMin, eMin));
+  const keys = new Set(keep.map(tripKey));
+  (tplDuty.trips || [])
+    .filter((t) => tripInWindow(t, sMin, eMin) && !keys.has(tripKey(t)))
+    .forEach((t) => keep.push(cloneTrip(t)));
+  duty.trips = keep.slice().sort((a, b) => (toMin(a.dep) || 0) - (toMin(b.dep) || 0));
+  recomputeDutyTimes(duty);
+}
+
 app.get("/api/shifts", requireAuth, (req, res) => {
   const data = db.load();
   const items = data.shifts.map((s) => ({
@@ -805,7 +948,7 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
     const tpl = tagesplanShift(data);
     if (tpl) {
       data.duties.filter((d) => d.shiftId === tpl.id).forEach((d) => {
-        data.duties.push({
+        const nd = {
           ...d,
           id: uid(),
           shiftId: shift.id,
@@ -824,7 +967,10 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
             bemerkung: "",
             stops: (t.stops || []).map((s) => ({ ...s, id: uid(), cancelled: false })),
           })),
-        });
+        };
+        // Dutys nur auf die Shift-Zeitfenster begrenzen (Feature „Dutys in der Shiftzeit“)
+        cutDutyToShiftTimes(nd, shift);
+        data.duties.push(nd);
         copied++;
       });
     }
@@ -853,6 +999,21 @@ app.patch("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
       .filter((id) => id !== s.hostId)
       .slice(0, 2);
   }
+
+  // Shift-Zeit geändert → Dutys aufs neue Fenster schneiden bzw. bei Verlängerung ergänzen
+  if (typeof startTime === "string" || typeof endTime === "string") {
+    const sMin = toMin(s.startTime || "");
+    const eMin = toMin(s.endTime || "");
+    if (sMin !== null || eMin !== null) {
+      const tpl = tagesplanShift(data);
+      const tplDuties = tpl ? data.duties.filter((d) => d.shiftId === tpl.id) : [];
+      data.duties.filter((d) => d.shiftId === s.id).forEach((d) => {
+        const tplDuty = tplDuties.find((t) => t.name === d.name) || { trips: [] };
+        syncDutyToShiftTimes(d, tplDuty, sMin, eMin);
+      });
+    }
+  }
+
   db.save();
   res.json({ shift: s });
 });
@@ -889,7 +1050,7 @@ app.post("/api/shifts/:id/copy", requireAuth, requireSupervisor, (req, res) => {
   };
   data.shifts.push(shift);
   data.duties.filter((d) => d.shiftId === src.id).forEach((d) => {
-    data.duties.push({
+    const nd = {
       ...d, id: uid(), shiftId: shift.id,
       assignedUserId: null, vehicleId: null, cancelled: false, cancelNote: "", bemerkung: "",
       trips: (d.trips || []).map((t) => ({
@@ -897,7 +1058,10 @@ app.post("/api/shifts/:id/copy", requireAuth, requireSupervisor, (req, res) => {
         cancelled: false, cancelNote: "", bemerkung: "",
         stops: (t.stops || []).map((s) => ({ ...s, id: uid(), cancelled: false })),
       })),
-    });
+    };
+    // Kopierte Dutys auf die (ggf. verschobenen) Shift-Zeiten begrenzen
+    cutDutyToShiftTimes(nd, shift);
+    data.duties.push(nd);
   });
   db.save();
   res.json({ shift });
@@ -1456,6 +1620,11 @@ app.post("/api/announcements", requireAuth, requireSupervisor, (req, res) => {
   });
   db.save();
 
+  // System-/Desktop-Push an alle Zielgruppen-Nutzer
+  const pushers = (data.pushSubscriptions || [])
+    .filter((x) => data.users.find((u) => u.id === x.userId && audiences.includes(u.role)));
+  pushToSubs(pushers, (isUrgent ? "Dringend – " : "") + "Ansage: " + req.user.username, ann.text);
+
   // Poll-Erkennung: Bühne über eine zentrale Rückgabe
   res.json({ announcement: ann });
 });
@@ -1529,6 +1698,42 @@ app.post("/api/notifications/read-all", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Web Push (System-/Desktop-Benachrichtigungen) ----------
+
+app.get("/api/push/vapid", (req, res) => {
+  res.json({ publicKey: ensureVapidKeys().publicKey });
+});
+
+app.post("/api/push/register", requireAuth, (req, res) => {
+  const data = db.load();
+  const { endpoint, auth, p256dh, ua } = req.body || {};
+  if (!endpoint || !auth || !p256dh) {
+    return res.status(400).json({ error: "endpoint, auth und p256dh fehlen" });
+  }
+  data.pushSubscriptions = (data.pushSubscriptions || []).filter((x) => x.userId !== req.user.id || x.endpoint !== endpoint);
+  data.pushSubscriptions.push({
+    userId: req.user.id,
+    endpoint,
+    keys: { auth, p256dh },
+    ua: ua || "",
+    createdAt: new Date().toISOString(),
+  });
+  db.save();
+  res.json({ ok: true });
+});
+
+app.post("/api/push/unregister", requireAuth, (req, res) => {
+  const data = db.load();
+  const { endpoint } = req.body || {};
+  if (endpoint) {
+    data.pushSubscriptions = (data.pushSubscriptions || []).filter((x) => x.endpoint !== endpoint);
+  } else {
+    data.pushSubscriptions = (data.pushSubscriptions || []).filter((x) => x.userId !== req.user.id);
+  }
+  db.save();
+  res.json({ ok: true });
+});
+
 // ---------- Fahrzeugübersicht ----------
 
 app.get("/api/vehicles/overview", requireAuth, (req, res) => {
@@ -1582,7 +1787,9 @@ app.get("/healthz", (req, res) => res.json({ ok: true }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`VBG Website API läuft auf Port ${PORT}`);
-  console.log(`Daten-Datei: ${db.DATA_FILE}`);
+boot().then(() => {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`VBG Website API läuft auf Port ${PORT}`);
+    console.log(`Daten-Datei: ${db.DATA_FILE}`);
+  });
 });
