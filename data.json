@@ -1,0 +1,59 @@
+{
+  "users": [
+    {
+      "id": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "username": "jggaming2518",
+      "passwordHash": "$2a$10$cfF0DaJjosoROTEjOSK2neoF2oijW2pvNGcOQfBKKcAD8TCGLF4ku",
+      "role": "supervisor",
+      "linien": [
+        "lin19",
+        "lin24",
+        "lin8",
+        "linN1"
+      ],
+      "strafstunden": 0,
+      "discordName": "",
+      "robloxName": "",
+      "robloxChangedAt": null,
+      "displayName": "",
+      "displayNameChangedAt": null,
+      "language": "de",
+      "avatar": "",
+      "suspended": false,
+      "protected": true,
+      "createdAt": "2026-09-25T18:55:17.929Z"
+    }
+  ],
+  "linien": [
+    {
+      "id": "lin19",
+      "name": "19",
+      "beschreibung": "Stümp Voiskamp – Gravenberg ZOB (Solo)"
+    },
+    {
+      "id": "lin24",
+      "name": "(SB) 24",
+      "beschreibung": "Schnellbus Sorenkoppel – Gravenberg ZOB (Gelenk/Solo)"
+    },
+    {
+      "id": "lin8",
+      "name": "8",
+      "beschreibung": "Bf. Gravenberg – Bergdorf (Solo)"
+    },
+    {
+      "id": "linN1",
+      "name": "N1",
+      "beschreibung": "Nachtbus Gravenberg ZOB – Sorenkoppel (Gelenk)"
+    }
+  ],
+  "fahrzeuge": [],
+  "shifts": [],
+  "duties": [],
+  "wishes": [],
+  "applications": [],
+  "kundenservice": [],
+  "activity": [],
+  "notifications": [],
+  "announcements": [],
+  "announcementDate": null
+}

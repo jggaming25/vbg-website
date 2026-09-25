@@ -554,6 +554,15 @@ app.delete("/api/users/:id", requireAuth, requireSupervisor, (req, res) => {
   res.json({ ok: true });
 });
 
+// Backup/Export: liefert die komplette Datenbank als JSON, damit sie (z. B. als data.json)
+// ins Repo committet werden kann und nach einem Deploy wiederhergestellt wird.
+app.get("/api/backup", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  res.set("Content-Disposition", 'attachment; filename="data.json"');
+  res.set("Content-Type", "application/json; charset=utf-8");
+  res.send(JSON.stringify(data, null, 2));
+});
+
 // Strafstunden: Supervisor setzt einzelnen Wert (Backend); Frontend bietet -0,5/+0,5 usw.
 app.post("/api/users/:id/strafstunden", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
