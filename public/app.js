@@ -995,7 +995,7 @@
 
     // Anmelde-Deadline basierend auf Shiftplan
     let deadlineHtml = "";
-    if (state.shifts) {
+    if (state.shifts && state.shifts.shifts) {
       const now = new Date();
       const today = now.toISOString().slice(0, 10);
       const upcomingShifts = state.shifts.shifts.filter((s) => {
@@ -1009,8 +1009,6 @@
         const deadline = new Date(shiftDate + "T" + shiftStart);
         const diffMs = deadline - now;
         if (diffMs > 0) {
-          const hours = Math.floor(diffMs / 3600000);
-          const mins = Math.floor((diffMs % 3600000) / 60000);
           deadlineHtml = `<div class="stat"><div class="num">${h(shiftDate)} ${h(shiftStart)}</div><div class="lbl">Nächster Shift (Anmelde-Deadline)</div></div>`;
         }
       }
@@ -1348,20 +1346,21 @@
     if (!f) return;
     const el = document.getElementById("fz-form");
     if (!el) return;
+    const editId = "edit-" + id;
     el.innerHTML = `
       <div class="container">
         <h3>Fahrzeug bearbeiten</h3>
         <div class="form-grid">
-          <label>Wagennummer<input id="fz-wagennummer" value="${h(f.wagennummer)}"/></label>
-          <label>Kennzeichen<input id="fz-kennzeichen" value="${h(f.kennzeichen)}"/></label>
-          <label>Typ<select id="fz-typ">
+          <label>Wagennummer<input id="${editId}-wagennummer" value="${h(f.wagennummer)}"/></label>
+          <label>Kennzeichen<input id="${editId}-kennzeichen" value="${h(f.kennzeichen)}"/></label>
+          <label>Typ<select id="${editId}-typ">
             <option value="Bus" ${f.typ === "Bus" ? "selected" : ""}>Bus</option>
             <option value="Sonderfahrzeug" ${f.typ === "Sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
             <option value="Ersatzwagen" ${f.typ === "Ersatzwagen" ? "selected" : ""}>Ersatzwagen</option>
             <option value="Fahrschule" ${f.typ === "Fahrschule" ? "selected" : ""}>Fahrschule</option>
             <option value="Reserve" ${f.typ === "Reserve" ? "selected" : ""}>Reserve</option>
           </select></label>
-          <label>Status<select id="fz-status">
+          <label>Status<select id="${editId}-status">
             <option value="einsatzbereit" ${f.status === "einsatzbereit" ? "selected" : ""}>Einsatzbereit</option>
             <option value="nicht_einsatzbereit" ${f.status === "nicht_einsatzbereit" ? "selected" : ""}>Nicht einsatzbereit</option>
             <option value="sonderfahrzeug" ${f.status === "sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
@@ -1369,25 +1368,25 @@
             <option value="fahrschule" ${f.status === "fahrschule" ? "selected" : ""}>Fahrschule</option>
             <option value="reserve" ${f.status === "reserve" ? "selected" : ""}>Reserve</option>
           </select></label>
-          <label>Ort<input id="fz-ort" value="${h(f.ort)}"/></label>
-          <label>Bemerkung<input id="fz-bemerkung" value="${h(f.bemerkung)}"/></label>
+          <label>Ort<input id="${editId}-ort" value="${h(f.ort)}"/></label>
+          <label>Bemerkung<input id="${editId}-bemerkung" value="${h(f.bemerkung)}"/></label>
         </div>
         <div class="flex" style="margin-top:10px">
-          <button class="btn btn-green" onclick="VBG.saveFahrzeug('${id}')">Speichern</button>
+          <button class="btn btn-green" onclick="VBG.saveFahrzeug('${id}', '${editId}')">Speichern</button>
           <button class="btn btn-ghost" onclick="document.getElementById('fz-form').innerHTML=''">Abbrechen</button>
         </div>
       </div>`;
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }
 
-  async function saveFahrzeug(id) {
+  async function saveFahrzeug(id, editId) {
     const body = {
-      wagennummer: document.getElementById("fz-wagennummer").value.trim(),
-      kennzeichen: document.getElementById("fz-kennzeichen").value.trim(),
-      typ: document.getElementById("fz-typ").value,
-      status: document.getElementById("fz-status").value,
-      ort: document.getElementById("fz-ort").value.trim(),
-      bemerkung: document.getElementById("fz-bemerkung").value.trim(),
+      wagennummer: document.getElementById(editId + "-wagennummer").value.trim(),
+      kennzeichen: document.getElementById(editId + "-kennzeichen").value.trim(),
+      typ: document.getElementById(editId + "-typ").value,
+      status: document.getElementById(editId + "-status").value,
+      ort: document.getElementById(editId + "-ort").value.trim(),
+      bemerkung: document.getElementById(editId + "-bemerkung").value.trim(),
     };
     if (!body.wagennummer) { toast("Wagennummer fehlt", "err"); return; }
     try {
