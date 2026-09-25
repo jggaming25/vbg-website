@@ -37,6 +37,8 @@ function emptyStore() {
     notifications: [],
     announcements: [], // Broadcast-Nachrichten (Supervisor → Zielgruppen)
     pushSubscriptions: [], // Web-Push-Abonnements (Browser-Push-Targets pro Nutzer)
+    fahrtenbuch: [], // Fahrtenbuch-Einträge (manuell, pro Fahrzeug)
+    supervisorLog: [], // Protokoll aller Supervisor-Aktionen
     announcementDate: null,
   };
 }
@@ -151,6 +153,8 @@ function shapeAndMigrate(db) {
   if (!db.notifications) db.notifications = [];
   if (!db.announcements) db.announcements = [];
   if (!db.pushSubscriptions) db.pushSubscriptions = [];
+  if (!db.fahrtenbuch) db.fahrtenbuch = [];
+  if (!db.supervisorLog) db.supervisorLog = [];
   if (db.announcementDate === undefined) db.announcementDate = null;
 
   // Migration älterer Felder

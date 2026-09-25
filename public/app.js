@@ -54,6 +54,7 @@
     nav_shiftplan: ["Shiftplan", "Duty plan"],
     nav_anmeldung: ["Anmeldung", "Sign up"],
     nav_activity: ["Activity", "Activity"],
+    nav_fahrtenbuch: ["Fahrtenbuch", "Logbook"],
     nav_supervisor: ["Supervisor", "Supervisor"],
     nav_account: ["Account", "Account"],
   };
@@ -114,6 +115,7 @@
     const date = String(d.getDate()).padStart(2, "0") + "." + String(d.getMonth() + 1).padStart(2, "0") + ".";
     return sameDay ? hh + ":" + mm : date + " " + hh + ":" + mm;
   }
+  const fmtTimestamp = fmtTime;
 
   // ---------- Strafstunden-Frist ----------
   function fmtFristDate(iso) {
@@ -228,11 +230,17 @@
     // Activity
     actMe: null,
     actAll: null,
+    // Fahrtenbuch
+    fahrtenbuch: null,
+    fbTodayOpen: [],
+    fbVehicle: "",
+    fbEditId: null,
     // Supervisor
     appsAll: [],
     wishesAll: [],
     profile: null,
     latestAnnounce: null,
+    superLog: [],
     // Filter
     appFilter: { nutzer: "", shift: "" },
     activityRange: "monat",
@@ -275,6 +283,24 @@
       const r = await api("GET", "/api/shifts/" + state.planShiftId + "/duties");
       state.plan = r;
     } catch (e) { state.plan = null; }
+  }
+
+  async function loadFahrtenbuch() {
+    try {
+      const r = await api("GET", "/api/fahrtenbuch");
+      state.fahrtenbuch = r.entries || [];
+      state.fbTodayOpen = r.todayOpen || [];
+      if (!state.fbVehicle) {
+        const first = (state.fahrtenbuch[0] && state.fahrtenbuch[0].vehicleId)
+          || state.cats.fahrzeuge[0] && state.cats.fahrzeuge[0].id;
+        if (first) state.fbVehicle = first;
+      }
+    } catch (e) { state.fahrtenbuch = state.fahrtenbuch || []; }
+  }
+
+  async function loadSuperLog() {
+    try { const r = await api("GET", "/api/supervisor-log"); state.superLog = r.items || []; }
+    catch (e) { state.superLog = []; }
   }
 
   function refreshAll() {
@@ -349,6 +375,7 @@
       { id: "shiftplan", label: t("nav_shiftplan") },
       { id: "anmeldung", label: t("nav_anmeldung") },
       { id: "activity", label: t("nav_activity") },
+      { id: "fahrtenbuch", label: t("nav_fahrtenbuch") },
     ];
     if (isSup()) tabs.push({ id: "supervisor", label: t("nav_supervisor") });
     const links = tabs
@@ -414,6 +441,7 @@
       case "shiftplan": return renderShiftplanView();
       case "anmeldung": return renderAnmeldung();
       case "activity": return renderActivity();
+      case "fahrtenbuch": return renderFahrtenbuch();
       case "supervisor": return renderSupervisor();
       case "account": return renderAccount();
       default: return renderDashboard();
@@ -460,6 +488,31 @@
           ${isSup() ? `<button class="btn btn-ghost" onclick="VBG.setView('supervisor')">Supervisor-Bereich</button>` : ""}
           <button class="btn btn-ghost" onclick="VBG.setView('account')">Account</button>
         </div>
+      </div>`;
+  }
+
+  function superProtokollView() {
+    const items = state.superLog || [];
+    const rows = items.length ? items.map((x) => `
+      <tr>
+        <td class="muted" style="white-space:nowrap">${h(fmtTimestamp(x))}</td>
+        <td>${h(x.actor || "?")}</td>
+        <td><b>${h(x.action || "")}</b></td>
+        <td>${h(x.detail || "")}</td>
+      </tr>`).join("")
+      : `<tr><td colspan="4" class="muted">Noch keine Einträge.</td></tr>`;
+    return `
+      <div class="spread">
+        <span class="muted">Nur die letzten 2000 Aktionen werden gespeichert</span>
+        <div class="flex">
+          <button class="btn btn-ghost" onclick="VBG.loadSuperLog().then(()=>render())">Aktualisieren</button>
+        </div>
+      </div>
+      <div class="container">
+        <table>
+          <thead><tr><th>Wann</th><th>Wer</th><th>Aktion</th><th>Details</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>`;
   }
 
@@ -976,6 +1029,164 @@
       </div>`;
   }
 
+  // ---------- Fahrtenbuch ----------
+  function fbTodayISO() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function renderFahrtenbuch() {
+    const fzs = state.cats.fahrzeuge || [];
+    const entries = state.fahrtenbuch || [];
+    const sel = fzs.find((f) => f.id === state.fbVehicle) || null;
+    const vehEntries = entries.filter((e) => e.vehicleId === state.fbVehicle);
+    const open = state.fbTodayOpen || [];
+    const pills = fzs.map((f) => {
+      const n = entries.filter((e) => e.vehicleId === f.id).length;
+      return `<button class="btn btn-sm ${state.fbVehicle === f.id ? "btn-green" : "btn-ghost"}" onclick="VBG.setFbVehicle('${f.id}')">${h(f.wagennummer || f.typ || "–")}${n ? ` <span class="badge">${n}</span>` : ""}</button>`;
+    }).join("");
+
+    return `
+      <h2>Fahrtenbuch</h2>
+      ${open.length ? `<div class="container" style="border-color:var(--yellow)">
+        <h3>Heute offen – noch kein Eintrag</h3>
+        ${open.map((o) => `<div class="flex">
+          <span><b>${h(o.dutyName)}</b> · ${h(o.shiftName)}${o.linieName ? " · Linie " + h(o.linieName) : ""}${o.vehicleId ? " · " + h(fzName(o.vehicleId)) : ""}</span>
+          <span class="muted">${h(o.fahrername)}</span>
+          <button class="btn btn-xs" onclick="VBG.openFbNew('${o.vehicleId || ""}','${o.linieId || ""}')">Eintrag schreiben</button>
+        </div>`).join("")}
+      </div>` : ""}
+      <div class="spread">
+        <div class="flex" style="gap:6px;flex-wrap:wrap">${pills || `<span class="muted">Noch keine Fahrzeuge angelegt</span>`}</div>
+        <button class="btn" onclick="VBG.showFbForm()">+ Neuer Eintrag</button>
+      </div>
+      ${sel ? `<div class="muted" style="margin:6px 0">${h(sel.wagennummer || "")}${sel.typ ? " · " + h(sel.typ) : ""}${sel.kennzeichen ? " · " + h(sel.kennzeichen) : ""}${sel.status ? " · " + h((FZ_STATUS[sel.status] || {}).label || sel.status) : ""}</div>` : ""}
+      <div id="fb-form"></div>
+      ${vehEntries.length ? `
+        <div class="container">
+          <table>
+            <thead><tr><th>Datum</th><th>Fahrer</th><th>Linie</th><th>Blitzer</th><th>Defekte</th><th>Behoben</th><th>Info</th>${isSup() ? "<th></th>" : ""}</tr></thead>
+            <tbody>
+              ${vehEntries.map((e) => `
+                <tr>
+                  <td>${h(fmtFristDate(e.datum))}</td>
+                  <td>${h(e.fahrername || "–")}</td>
+                  <td>${e.linieName ? `<span class="badge ${linieClsId(e.linieId)}">${h(e.linieName)}</span>` : "–"}</td>
+                  <td>${e.blitzer ?? ""}</td>
+                  <td>${e.defekte ?? ""}</td>
+                  <td>${e.behoben ?? ""}</td>
+                  <td>${h(e.info || "")}</td>
+                  ${isSup() ? `<td>
+                    <button class="btn btn-ghost btn-xs" onclick="VBG.editFbEntry('${e.id}')">Bearbeiten</button>
+                    <button class="btn btn-danger btn-xs" onclick="VBG.deleteFbEntry('${e.id}')">Löschen</button>
+                  </td>` : ""}
+                </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>` : `<div class="muted">Keine Einträge für dieses Fahrzeug.</div>`}`;
+  }
+
+  function showFbForm(editId) {
+    state.fbEditId = editId || null;
+    const el = document.getElementById("fb-form");
+    if (!el) { toast("View bitte neu öffnen", "err"); return; }
+    const e = editId ? (state.fahrtenbuch || []).find((x) => x.id === editId) : null;
+    const presetLinie = state.fbFormPresetLinie || "";
+    state.fbFormPresetLinie = "";
+    const fzs = state.cats.fahrzeuge || [];
+    const lins = state.cats.linien || [];
+    const selVehicle = e ? e.vehicleId : state.fbVehicle;
+    const title = e ? "Eintrag bearbeiten" : "Neuer Fahrtenbuch-Eintrag";
+    el.innerHTML = `
+      <div class="container">
+        <h3>${title}</h3>
+        <div class="form-grid">
+          <label>Fahrzeug<select id="fb-vehicle">
+            ${fzs.map((f) => `<option value="${f.id}" ${selVehicle === f.id ? "selected" : ""}>${h(f.wagennummer || f.typ || "–")}</option>`).join("")}
+          </select></label>
+          <label>Datum<input id="fb-datum" type="date" value="${h((e && e.datum) || fbTodayISO())}"/></label>
+          <label>Linie<select id="fb-linie">
+            <option value="">— Linie wählen —</option>
+            ${lins.map((l) => `<option value="${l.id}" ${((e && e.linieId) || presetLinie) === l.id ? "selected" : ""}>${h(l.name)}${l.beschreibung ? " – " + h(l.beschreibung) : ""}</option>`).join("")}
+          </select></label>
+          ${isSup() ? `
+            <label>Fahrer<select id="fb-driver">
+              ${(state.users || []).map((u) => `<option value="${u.id}" ${e && e.driverUserId === u.id ? "selected" : ""}>${h(u.displayName || u.username)}</option>`).join("")}
+            </select></label>
+            <label>Fahrername (Anzeige)<input id="fb-fahrername" value="${h(((e && e.fahrername) || ""))}" placeholder="wenn abweichend"/></label>` : `
+            <label>Fahrer<input value="${h(state.user.displayName || state.user.username)}" disabled/></label>`}
+          <label>Blitzer (Anzahl)<input id="fb-blitzer" type="number" min="0" value="${e ? e.blitzer : "0"}"/></label>
+          <label>Defekte (Anzahl)<input id="fb-defekte" type="number" min="0" value="${e ? e.defekte : "0"}"/></label>
+          <label>Behoben bis Ende (Anzahl)<input id="fb-behoben" type="number" min="0" value="${e ? e.behoben : "0"}"/></label>
+        </div>
+        <label style="display:block;margin-top:10px">Besondere Informationen (optional)<textarea id="fb-info" rows="2" placeholder="z. B. Verzögerungen, Zwischenfälle …">${h((e && e.info) || "")}</textarea></label>
+        <div class="flex" style="margin-top:10px">
+          <button class="btn btn-green" onclick="VBG.saveFbEntry()">Speichern</button>
+          <button class="btn btn-ghost" onclick="VBG.hideFbForm()">Abbrechen</button>
+        </div>
+      </div>`;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }
+
+  function hideFbForm() {
+    state.fbEditId = null;
+    const el = document.getElementById("fb-form");
+    if (el) el.innerHTML = "";
+    render();
+  }
+
+  async function saveFbEntry() {
+    const editId = state.fbEditId;
+    if (!document.getElementById("fb-vehicle")) return;
+    const num = (id) => Number(document.getElementById(id).value);
+    const body = {
+      vehicleId: document.getElementById("fb-vehicle").value,
+      datum: document.getElementById("fb-datum").value,
+      linieId: document.getElementById("fb-linie").value,
+      blitzer: num("fb-blitzer"),
+      defekte: num("fb-defekte"),
+      behoben: num("fb-behoben"),
+      info: document.getElementById("fb-info").value,
+    };
+    if (isSup()) {
+      const dv = document.getElementById("fb-driver");
+      if (dv) body.driverUserId = dv.value;
+      const fn = document.getElementById("fb-fahrername");
+      if (fn && fn.value.trim()) body.fahrername = fn.value.trim();
+    }
+    if (!body.datum) { toast("Datum fehlt", "err"); return; }
+    if (!body.vehicleId) { toast("Fahrzeug fehlt", "err"); return; }
+    if (!body.linieId) { toast("Linie fehlt", "err"); return; }
+    for (const k of ["blitzer", "defekte", "behoben"]) {
+      if (!Number.isInteger(body[k]) || body[k] < 0) { toast({ blitzer: "Blitzer", defekte: "Defekte", behoben: "Behoben" }[k] + ": ganze Zahl ≥ 0 nötig", "err"); return; }
+    }
+    if (body.behoben > body.defekte) { toast("Behoben darf nicht über den Defekten liegen", "err"); return; }
+    try {
+      if (editId) await api("PATCH", "/api/fahrtenbuch/" + editId, body);
+      else await api("POST", "/api/fahrtenbuch", body);
+      toast(editId ? "Eintrag gespeichert" : "Fahrtenbuch-Eintrag angelegt", "ok");
+      state.fbEditId = null;
+      hideFbForm();
+      await loadFahrtenbuch();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  function setFbVehicle(v) { state.fbVehicle = v; state.fbEditId = null; render(); }
+  function openFbNew(vehicleId, linieId) {
+    if (vehicleId) state.fbVehicle = vehicleId;
+    state.fbFormPresetLinie = linieId || "";
+    showFbForm();
+    render();
+  }
+  function editFbEntry(id) { showFbForm(id); }
+  async function deleteFbEntry(id) {
+    const e = (state.fahrtenbuch || []).find((x) => x.id === id);
+    if (!confirm("Fahrtenbuch-Eintrag wirklich löschen?" + (e ? "\n" + e.datum + " – " + (e.fahrername || "") : ""))) return;
+    try { await api("DELETE", "/api/fahrtenbuch/" + id); toast("Eintrag gelöscht", "ok"); await loadFahrtenbuch(); render(); }
+    catch (er) { toast(er.message, "err"); }
+  }
+
   // ---------- Supervisor ----------
   function renderSupervisor() {
     const tabs = [
@@ -983,6 +1194,7 @@
       { id: "linien", label: "Lizenzen & Linien" },
       { id: "anmeldungen", label: "Anmeldungen" },
       { id: "activity", label: "Activity" },
+      { id: "protokoll", label: "Protokoll" },
     ];
     const tabHtml = `<div class="tabs">${tabs.map((tb) => `<button class="tab ${state.superTab === tb.id ? "active" : ""}" onclick="VBG.setSuperTab('${tb.id}')">${tb.label}</button>`).join("")}</div>`;
     let body = "";
@@ -990,6 +1202,7 @@
     else if (state.superTab === "linien") body = superLinienView();
     else if (state.superTab === "anmeldungen") body = superAnmeldungenView();
     else if (state.superTab === "activity") body = activityAllView();
+    else if (state.superTab === "protokoll") body = superProtokollView();
     return `<h2>Supervisor</h2>${tabHtml}${body}`;
   }
 
@@ -1513,6 +1726,7 @@
     if (v === "shiftplan") { /* bleibt */ }
     if (v === "anmeldung") { /* */ }
     if (v === "supervisor" && isSup()) { loadUsers().then(() => { loadAppsAll(); render(); }); return; }
+    if (v === "fahrtenbuch") { loadFahrtenbuch().then(() => render()); return; }
     if (v === "account") { loadProfile().then(() => render()); return; }
     state.notifOpen = false;
     render();
@@ -1523,6 +1737,7 @@
     if (tab === "users") { loadUsers().then(() => render()); return; }
     if (tab === "anmeldungen") { loadAppsAll().then(() => render()); return; }
     if (tab === "activity") { state.actAll = null; loadActivityAll().then((r) => { state.actAll = r; render(); }); return; }
+    if (tab === "protokoll") { loadSuperLog().then(() => render()); return; }
     render();
   }
 
@@ -2224,6 +2439,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       }
       if (state.view === "account") await loadProfile();
       if (state.view === "supervisor" && state.superTab === "anmeldungen") await loadAppsAll();
+      if (state.view === "fahrtenbuch") await loadFahrtenbuch();
+      if (state.view === "supervisor" && state.superTab === "protokoll") await loadSuperLog();
     }, 20000);
   }
 
@@ -2263,6 +2480,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     addStopRow, removeStopRow,
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
+    setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
+    loadFahrtenbuch, loadSuperLog,
   };
 
   init();

@@ -277,6 +277,125 @@ function effectiveVehicle(duty) {
   return t ? t.vehicleId : null;
 }
 
+// ---------- Supervisor-Aktions-Protokoll (Audit-Log) ----------
+const SUP_LOG_CAP = 2000;
+function audit(data, actor, action, detail) {
+  data.supervisorLog = data.supervisorLog || [];
+  data.supervisorLog.push({
+    id: uid(),
+    actorId: actor ? actor.id : null,
+    actorName: actor ? (actor.displayName || actor.username || actor.id) : "?",
+    action,
+    detail,
+    createdAt: new Date().toISOString(),
+  });
+  if (data.supervisorLog.length > SUP_LOG_CAP) {
+    data.supervisorLog = data.supervisorLog.slice(-SUP_LOG_CAP);
+  }
+}
+
+// ---------- Fahrtenbuch (manuelle Einträge, pro Fahrzeug) ----------
+function fbWeekCutoffWeeks(role) {
+  return role === "supervisor" ? 8 : 4;
+}
+function fbCutoffDate(weeksAgo) {
+  const d = new Date();
+  d.setDate(d.getDate() - 7 * weeksAgo);
+  return d.toISOString().slice(0, 10);
+}
+function isIntNum(v) {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0;
+}
+function fbValidate(body, isSup, actor) {
+  const res = { ok: true, errors: [] };
+  if (!body || typeof body !== "object") { res.ok = false; res.errors.push("Fehlende Daten"); return res; }
+  const datum = String(body.datum || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum) || isNaN(new Date(datum).getTime())) res.errors.push("Datum fehlt oder ungültig");
+  const linieId = body.linieId || "";
+  if (!linieId) res.errors.push("Linie fehlt");
+  if (!isIntNum(body.blitzer)) res.errors.push("Blitzer: ganze Zahl ≥ 0 nötig");
+  if (!isIntNum(body.defekte)) res.errors.push("Defekte: ganze Zahl ≥ 0 nötig");
+  if (!isIntNum(body.behoben)) res.errors.push("Behoben: ganze Zahl ≥ 0 nötig");
+  if (isIntNum(body.defekte) && isIntNum(body.behoben) && body.behoben > body.defekte) {
+    res.errors.push("Beim Ende behoben darf nicht höher sein als die Defekte");
+  }
+  const fz = vehicleById(body.vehicleId);
+  if (!fz) res.errors.push("Fahrzeug fehlt oder existiert nicht");
+  if (!isSup) {
+    const linie = db.load().linien.find((l) => l.id === linieId);
+    if (!linie) res.errors.push("Linie existiert nicht");
+  }
+  if (res.errors.length) { res.ok = false; }
+  return res;
+}
+function enrichFbEntry(data, e) {
+  const fz = data.fahrzeuge.find((f) => f.id === e.vehicleId) || null;
+  const linie = data.linien.find((l) => l.id === e.linieId) || null;
+  const drv = data.users.find((u) => u.id === e.driverUserId) || null;
+  return {
+    ...e,
+    vehicle: fz ? (fz.wagennummer || fz.typ || fz.id) : "–",
+    vehicleKennzeichen: fz ? fz.kennzeichen : "",
+    vehicleTyp: fz ? fz.typ : "",
+    linieName: linie ? (linie.name || linie.beschreibung) : "",
+    fahrername: drv ? (drv.displayName || drv.username) : (e.fahrername || ""),
+  };
+}
+function userDayName(d) {
+  return d.toISOString().slice(0, 10);
+}
+// „Heute offen“: heutige Einsätze (echte Shifts) mit Fahrer, für die noch kein
+// Fahrtenbuch-Eintrag (gleicher Fahrer, gleiche Linie, gleiches Datum) existiert.
+function fbTodayOpen(data, user) {
+  const today = userDayName(new Date());
+  const entries = data.fahrtenbuch || [];
+  const anyReal = data.shifts.some((s) => s.id !== "tpl-tagesplan" && s.date === today);
+  if (!anyReal) return [];
+  const rows = [];
+  data.duties.forEach((d) => {
+    if (d.cancelled) return;
+    const shift = data.shifts.find((s) => s.id === d.shiftId);
+    if (!shift || shift.id === "tpl-tagesplan" || shift.date !== today) return;
+    const fahrerIds = new Set();
+    if (d.assignedUserId) fahrerIds.add(d.assignedUserId);
+    (d.trips || []).forEach((t) => { if (t.assignedUserId) fahrerIds.add(t.assignedUserId); });
+    fahrerIds.forEach((fid) => {
+      if (user && user.role !== "supervisor" && fid !== user.id) return;
+      const hasEntry = entries.some((e) =>
+        e.driverUserId === fid && e.datum === today &&
+        (!d.linieId || e.linieId === d.linieId || !e.linieId));
+      if (hasEntry) return;
+      const drv = data.users.find((u) => u.id === fid);
+      rows.push({
+        dutyId: d.id, dutyName: d.name, shiftName: shift.name,
+        linieId: d.linieId || null,
+        vehicleId: effectiveVehicle(d),
+        linieName: (data.linien.find((l) => l.id === d.linieId) || {}).name || "",
+        fahrername: drv ? (drv.displayName || drv.username) : fid,
+        fahrerId: fid,
+        datum: today,
+      });
+    });
+  });
+  // deduplizieren (gleiche Linie+Fahrer+Tagname)
+  const seen = new Set();
+  return rows.filter((r) => {
+    const k = r.fahrerId + "|" + r.linieName + "|" + r.dutyName;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+// Löscht Einträge älter als 8 Wochen komplett (Retention).
+function cleanupFahrtenbuch() {
+  const cutoff = fbCutoffDate(8);
+  const data = db.load();
+  const before = (data.fahrtenbuch || []).length;
+  data.fahrtenbuch = (data.fahrtenbuch || []).filter((e) => (e.datum || "") >= cutoff);
+  if ((data.fahrtenbuch || []).length !== before) db.save();
+  return before - (data.fahrtenbuch || []).length;
+}
+
 function hasLineLicense(user, linieId) {
   if (!linieId) return true;
   return (user.linien || []).includes(linieId);
@@ -622,6 +741,7 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
     user.strafFristAuto = false;
   }
   syncStrafFrist(user);
+  audit(data, req.user, "Nutzer bearbeitet", (user.displayName || user.username || user.id));
   db.save();
   res.json({ user: publicUser(user) });
 });
@@ -639,6 +759,7 @@ app.delete("/api/users/:id", requireAuth, requireSupervisor, (req, res) => {
     if (d.assignedUserId === removed.id) d.assignedUserId = null;
     (d.trips || []).forEach((t) => { if (t.assignedUserId === removed.id) t.assignedUserId = null; });
   });
+  audit(data, req.user, "Nutzer gelöscht", (removed.displayName || removed.username || removed.id));
   db.save();
   res.json({ ok: true });
 });
@@ -676,6 +797,7 @@ app.post("/api/users/:id/strafstunden", requireAuth, requireSupervisor, (req, re
     });
   }
   syncStrafFrist(user);
+  audit(data, req.user, "Strafstunden geändert", (user.displayName || user.username) + " → " + user.strafstunden + " h");
   db.save();
   res.json({ user: publicUser(user) });
 });
@@ -764,6 +886,7 @@ app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
     stopsRueck: explicitRueck ? sanitizeStops(req.body.stopsRueck) : sanitizeStops(dflt && dflt.stopsRueck),
   };
   data.linien.push(item);
+  audit(data, req.user, "Linie angelegt", item.name);
   db.save();
   res.json({ item });
 });
@@ -776,6 +899,7 @@ app.patch("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
   if (typeof req.body.beschreibung === "string") l.beschreibung = req.body.beschreibung.trim();
   if (req.body.stopsHin !== undefined) l.stopsHin = sanitizeStops(req.body.stopsHin);
   if (req.body.stopsRueck !== undefined) l.stopsRueck = sanitizeStops(req.body.stopsRueck);
+  audit(data, req.user, "Linie bearbeitet", l.name);
   db.save();
   res.json({ item: l });
 });
@@ -787,6 +911,7 @@ app.delete("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
   data.linien.splice(i, 1);
   data.users.forEach((u) => (u.linien = (u.linien || []).filter((x) => x !== req.params.id)));
   data.duties.forEach((d) => { if (d.linieId === req.params.id) d.linieId = null; });
+  audit(data, req.user, "Linie gelöscht", req.params.id);
   db.save();
   res.json({ ok: true });
 });
@@ -809,6 +934,7 @@ app.post("/api/fahrzeuge", requireAuth, requireSupervisor, (req, res) => {
     bemerkung: (req.body.bemerkung || "").trim(),
   };
   data.fahrzeuge.push(item);
+  audit(data, req.user, "Fahrzeug angelegt", (item.wagennummer || item.typ || item.id));
   db.save();
   res.json({ item });
 });
@@ -824,6 +950,7 @@ app.patch("/api/fahrzeuge/:id", requireAuth, requireSupervisor, (req, res) => {
   if (typeof kennzeichen === "string") fz.kennzeichen = kennzeichen;
   if (typeof typ === "string") fz.typ = typ;
   if (typeof art === "string") fz.art = art;
+  audit(data, req.user, "Fahrzeug bearbeitet", (fz.wagennummer || fz.typ || fz.id));
   db.save();
   res.json({ item: fz });
 });
@@ -837,8 +964,94 @@ app.delete("/api/fahrzeuge/:id", requireAuth, requireSupervisor, (req, res) => {
     if (d.vehicleId === req.params.id) d.vehicleId = null;
     (d.trips || []).forEach((t) => { if (t.vehicleId === req.params.id) t.vehicleId = null; });
   });
+  audit(data, req.user, "Fahrzeug gelöscht", req.params.id);
   db.save();
   res.json({ ok: true });
+});
+
+// ---------- Fahrtenbuch ----------
+
+app.get("/api/fahrtenbuch", requireAuth, (req, res) => {
+  const data = db.load();
+  const weeks = fbWeekCutoffWeeks(req.user.role);
+  const cutoff = fbCutoffDate(weeks);
+  const entries = (data.fahrtenbuch || [])
+    .filter((e) => (e.datum || "") >= cutoff)
+    .map((e) => enrichFbEntry(data, e))
+    .sort((a, b) => String(b.datum).localeCompare(String(a.datum)) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  res.json({ entries, weeks, todayOpen: fbTodayOpen(data, req.user) });
+});
+
+app.post("/api/fahrtenbuch", requireAuth, (req, res) => {
+  const data = db.load();
+  const isSup = req.user.role === "supervisor";
+  const v = fbValidate(req.body, isSup, req.user);
+  if (!v.ok) return res.status(400).json({ error: v.errors.join("; ") });
+  const b = req.body;
+  const driverUserId = isSup && b.driverUserId
+    ? (data.users.find((u) => u.id === b.driverUserId) || { id: null }).id
+    : req.user.id;
+  const entry = {
+    id: uid(),
+    vehicleId: b.vehicleId,
+    datum: String(b.datum).trim(),
+    linieId: b.linieId,
+    driverUserId,
+    fahrername: isSup && b.fahrername ? String(b.fahrername).trim().slice(0, 80)
+      : (req.user.displayName || req.user.username || req.user.id),
+    blitzer: b.blitzer,
+    defekte: b.defekte,
+    behoben: b.behoben,
+    info: String(b.info || "").trim().slice(0, 500),
+    createdBy: req.user.id,
+    createdAt: new Date().toISOString(),
+    updatedAt: null,
+    updatedBy: null,
+  };
+  data.fahrtenbuch.push(entry);
+  audit(data, req.user, "Fahrtenbuch angelegt", `Fahrzeug ${enrichFbEntry(data, entry).vehicle}, ${entry.datum}, ${entry.fahrername}`);
+  db.save();
+  res.json({ entry: enrichFbEntry(data, entry) });
+});
+
+app.patch("/api/fahrtenbuch/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const e = (data.fahrtenbuch || []).find((x) => x.id === req.params.id);
+  if (!e) return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  const b = req.body || {};
+  if (typeof b.datum === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.datum.trim()) && !isNaN(new Date(b.datum.trim()).getTime())) e.datum = b.datum.trim();
+  if (typeof b.linieId === "string" && data.linien.find((l) => l.id === b.linieId)) e.linieId = b.linieId;
+  if (typeof b.vehicleId === "string" && vehicleById(b.vehicleId)) e.vehicleId = b.vehicleId;
+  if (typeof b.fahrername === "string") e.fahrername = b.fahrername.trim().slice(0, 80);
+  if (b.driverUserId) { const u = data.users.find((x) => x.id === b.driverUserId); if (u) e.driverUserId = u.id; }
+  if (isIntNum(b.blitzer)) e.blitzer = b.blitzer;
+  if (isIntNum(b.defekte)) e.defekte = b.defekte;
+  if (isIntNum(b.behoben)) e.behoben = b.behoben;
+  if (typeof b.info === "string") e.info = b.info.trim().slice(0, 500);
+  if (isIntNum(e.defekte) && isIntNum(e.behoben) && e.behoben > e.defekte) {
+    return res.status(400).json({ error: "Beim Ende behoben darf nicht höher sein als die Defekte" });
+  }
+  e.updatedBy = req.user.id;
+  e.updatedAt = new Date().toISOString();
+  audit(data, req.user, "Fahrtenbuch bearbeitet", `Fahrzeug ${enrichFbEntry(data, e).vehicle}, ${e.datum}, ${enrichFbEntry(data, e).fahrername}`);
+  db.save();
+  res.json({ entry: enrichFbEntry(data, e) });
+});
+
+app.delete("/api/fahrtenbuch/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const i = (data.fahrtenbuch || []).findIndex((x) => x.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  const [removed] = data.fahrtenbuch.splice(i, 1);
+  audit(data, req.user, "Fahrtenbuch gelöscht", "Fahrzeug " + enrichFbEntry(data, removed).vehicle + ", " + removed.datum + ", " + enrichFbEntry(data, removed).fahrername);
+  db.save();
+  res.json({ ok: true });
+});
+
+app.get("/api/supervisor-log", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const items = (data.supervisorLog || []).slice(-1000).reverse();
+  res.json({ items });
 });
 
 // ---------- Shifts (erstellen = Tagesplan automatisch kopieren) ----------
@@ -975,6 +1188,7 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
       });
     }
   }
+  audit(data, req.user, "Shift angelegt", shift.name + " (" + (shift.date || "ohne Datum") + ")");
   db.save();
 
   if (copied) notifyAll(`Neue Shift „${shift.name}“ ist da – ${copied} Dutys automatisch übernommen.`, "info");
@@ -1014,6 +1228,7 @@ app.patch("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
     }
   }
 
+  audit(data, req.user, "Shift bearbeitet", s.name + " (" + (s.date || "ohne Datum") + ")");
   db.save();
   res.json({ shift: s });
 });
@@ -1027,6 +1242,7 @@ app.delete("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
   data.duties = data.duties.filter((d) => d.shiftId !== req.params.id);
   data.applications = data.applications.filter((a) => a.shiftId !== req.params.id);
   data.wishes = data.wishes.filter((w) => !ids.has(w.dutyId));
+  audit(data, req.user, "Shift gelöscht", req.params.id);
   db.save();
   res.json({ ok: true });
 });
@@ -1063,6 +1279,7 @@ app.post("/api/shifts/:id/copy", requireAuth, requireSupervisor, (req, res) => {
     cutDutyToShiftTimes(nd, shift);
     data.duties.push(nd);
   });
+  audit(data, req.user, "Shift kopiert", src.name + " → " + shift.name);
   db.save();
   res.json({ shift });
 });
@@ -1105,6 +1322,7 @@ app.post("/api/shifts/:id/duties", requireAuth, requireSupervisor, (req, res) =>
     assignedUserId: null, trips: [], createdAt: new Date().toISOString(),
   };
   data.duties.push(duty);
+  audit(data, req.user, "Duty angelegt", duty.name);
   db.save();
   res.json({ duty: enrichDuty(duty) });
 });
@@ -1144,6 +1362,7 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
       notify(assignedUserId, `Du wurdest der Duty "${duty.name}" zugeteilt.`, "success");
     }
   }
+  audit(data, req.user, "Duty bearbeitet", duty.name);
   db.save();
   res.json({ duty: enrichDuty(duty) });
 });
@@ -1152,8 +1371,9 @@ app.delete("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const i = data.duties.findIndex((d) => d.id === req.params.id);
   if (i === -1) return res.status(404).json({ error: "Duty nicht gefunden" });
-  data.duties.splice(i, 1);
+  const [removed] = data.duties.splice(i, 1);
   data.wishes = data.wishes.filter((w) => w.dutyId !== req.params.id);
+  audit(data, req.user, "Duty gelöscht", removed.name || removed.id);
   db.save();
   res.json({ ok: true });
 });
@@ -1174,6 +1394,7 @@ app.post("/api/duties/:id/trips", requireAuth, requireSupervisor, (req, res) => 
   };
   duty.trips.push(trip);
   duty.trips = sortTrips(duty).trips;
+  audit(data, req.user, "Fahrt angelegt", duty.name + " · " + from + " → " + to);
   db.save();
   res.json({ duty: enrichDuty(duty) });
 });
@@ -1206,6 +1427,7 @@ app.patch("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req,
     }
   }
   duty.trips = sortTrips(duty).trips;
+  audit(data, req.user, "Fahrt bearbeitet", duty.name + " · " + (trip.from || "") + " → " + (trip.to || ""));
   db.save();
   res.json({ duty: enrichDuty(duty) });
 });
@@ -1214,8 +1436,10 @@ app.delete("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req
   const data = db.load();
   const duty = data.duties.find((d) => d.id === req.params.id);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
+  const trip = (duty.trips || []).find((t) => t.id === req.params.tripId);
   duty.trips = (duty.trips || []).filter((t) => t.id !== req.params.tripId);
   duty.trips = sortTrips(duty).trips;
+  audit(data, req.user, "Fahrt gelöscht", duty.name + " · " + ((trip && trip.from) || "") + " → " + ((trip && trip.to) || ""));
   db.save();
   res.json({ duty: enrichDuty(duty) });
 });
@@ -1313,6 +1537,7 @@ app.post("/api/wishes/:id/accept", requireAuth, requireSupervisor, (req, res) =>
   if (konflikt) return res.status(400).json({ error: konflikt });
   wish.status = "accepted";
   duty.assignedUserId = wish.userId;
+  audit(data, req.user, "Wunsch angenommen", duty.name + " → " + (data.users.find((u) => u.id === wish.userId) || {}).username);
   db.save();
   notify(wish.userId, `Dein Wunsch für "${duty.name}" wurde angenommen – du bist zugeteilt.`, "success");
   res.json({ ok: true });
@@ -1324,6 +1549,7 @@ app.post("/api/wishes/:id/deny", requireAuth, requireSupervisor, (req, res) => {
   if (!wish) return res.status(404).json({ error: "Wunsch nicht gefunden" });
   wish.status = "denied";
   const duty = data.duties.find((d) => d.id === wish.dutyId);
+  audit(data, req.user, "Wunsch abgelehnt", duty ? duty.name : "?", " " + (data.users.find((u) => u.id === wish.userId) || {}).username);
   db.save();
   if (duty) notify(wish.userId, `Dein Wunsch für "${duty.name}" wurde abgelehnt.`, "danger");
   res.json({ ok: true });
@@ -1424,6 +1650,7 @@ app.post("/api/applications/:id/accept", requireAuth, requireSupervisor, (req, r
   const a = data.applications.find((x) => x.id === req.params.id);
   if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
   a.status = "accepted";
+  audit(data, req.user, "Anmeldung angenommen", (data.users.find((u) => u.id === a.userId) || {}).username + " · " + a.art + " · " + a.von + "–" + a.bis);
   db.save();
   notify(a.userId, "Deine Anmeldung wurde angenommen.", "success");
   res.json({ ok: true });
@@ -1434,6 +1661,7 @@ app.post("/api/applications/:id/deny", requireAuth, requireSupervisor, (req, res
   const a = data.applications.find((x) => x.id === req.params.id);
   if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
   a.status = "denied";
+  audit(data, req.user, "Anmeldung abgelehnt", (data.users.find((u) => u.id === a.userId) || {}).username + " · " + a.art + " · " + a.von + "–" + a.bis);
   db.save();
   notify(a.userId, "Deine Anmeldung wurde abgelehnt.", "danger");
   res.json({ ok: true });
@@ -1441,7 +1669,9 @@ app.post("/api/applications/:id/deny", requireAuth, requireSupervisor, (req, res
 
 app.delete("/api/applications/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
-  data.applications = data.applications.filter((a) => a.id !== req.params.id);
+  const a = data.applications.find((x) => x.id === req.params.id);
+  data.applications = data.applications.filter((x) => x.id !== req.params.id);
+  audit(data, req.user, "Anmeldung gelöscht", a ? ((data.users.find((u) => u.id === a.userId) || {}).username + " · " + a.art) : req.params.id);
   db.save();
   res.json({ ok: true });
 });
@@ -1618,6 +1848,7 @@ app.post("/api/announcements", requireAuth, requireSupervisor, (req, res) => {
       });
     }
   });
+  audit(data, req.user, "Ansage gesendet", (isUrgent ? "[Dringend] " : "") + audiences.map(roleLabel).join(", ") + " – " + text.trim().slice(0, 80));
   db.save();
 
   // System-/Desktop-Push an alle Zielgruppen-Nutzer
@@ -1788,6 +2019,8 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 const PORT = process.env.PORT || 3000;
 boot().then(() => {
+  try { const removed = cleanupFahrtenbuch(); if (removed) console.log(`Fahrtenbuch-Aufräumlauf: ${removed} Einträge älter als 8 Wochen gelöscht`); } catch (e) { console.error("Fahrtenbuch-Cleanup fehlgeschlagen:", e.message); }
+  setInterval(() => { try { cleanupFahrtenbuch(); } catch (e) {} }, 6 * 60 * 60 * 1000);
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`VBG Website API läuft auf Port ${PORT}`);
     console.log(`Daten-Datei: ${db.DATA_FILE}`);
