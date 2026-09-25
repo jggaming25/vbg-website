@@ -1590,7 +1590,10 @@
       const p = await Notification.requestPermission();
       if (p !== "granted") return false;
     }
-    const reg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
+    // Korrekter Scope für GitHub Pages (Subpath /vbg-website/)
+    const base = window.VBG_API_BASE || "";
+    const swScope = base ? base.replace(/\/api$/, "/") : "./";
+    const reg = await navigator.serviceWorker.register("sw.js", { scope: swScope });
     await navigator.serviceWorker.ready;
     const pub = await getVapidPublicKey();
     if (!pub) return false;
