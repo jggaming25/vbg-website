@@ -673,17 +673,13 @@ app.patch("/api/me/profile", requireAuth, async (req, res) => {
   }
 
   if (typeof robloxName === "string" && robloxName.trim() !== (u.robloxName || "")) {
-    if (!canEditRoblox(u)) {
+    if (!isSup && !canEditRoblox(u)) {
       return res.status(400).json({ error: "Roblox-Name ist nur alle 6 Monate änderbar (oder durch Supervisor)" });
     }
     u.robloxName = robloxName.trim();
     u.robloxChangedAt = new Date().toISOString();
-    // Sind wir ein Supervisor, der das eigene Konto ändert? Dann keine Sperre nötig.
-    if (isSup && String(req.body._asSupervisor) === "true") {
-      u.robloxChangedAt = u.robloxChangedAt; // ok, bleibt
-    } else {
-      // Rückmeldung, dass Frist lief
-    }
+    // Supervisors dürfen ihren eigenen Roblox-Name jederzeit ändern (kein Cooldown nötig).
+    if (isSup) u.robloxChangedAt = u.robloxChangedAt;
   }
   db.save();
   res.json({ user: publicUser(u), robloxEditable: canEditRoblox(u), robloxChangedAt: u.robloxChangedAt, displayNameEditable: canEditDisplayName(u), displayNameChangedAt: u.displayNameChangedAt });

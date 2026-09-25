@@ -1419,6 +1419,7 @@
     const u = state.user;
     const prof = state.profile || null;
     const robloxEditable = prof ? prof.robloxEditable : (u && u.robloxEditable);
+    const robloxEnabled = isSup() || robloxEditable;
     const language2 = (u && u.language) || "de";
     const dnLocked = !(u && u.displayNameEditable);
     const dnNext = dnLocked && u && u.displayNameChangedAt
@@ -1450,14 +1451,14 @@
           <label>Anzeigename<input id="acc-displayname" value="${h(u.displayName || "")}" placeholder="Anzeigename (z. B. dein Busfahrer-Rangname)" ${dnLocked ? "disabled" : ""}/></label>
           <label>Discord Name<input id="acc-discord" value="${h(u.discordName || "")}" placeholder="z. B. jg_gaming"/></label>
           <label>Roblox Name<input id="acc-roblox" value="${h(u.robloxName || "")}" placeholder="z. B. jggaming2518"
-            ${!robloxEditable ? "disabled" : ""}/></label>
+            ${!robloxEnabled ? "disabled" : ""}/></label>
           <label>Sprache der Website<select id="acc-lang">
             <option value="de" ${language2 !== "en" ? "selected" : ""}>Deutsch</option>
             <option value="en" ${language2 === "en" ? "selected" : ""}>English</option>
           </select></label>
         </div>
         ${dnLocked ? `<div class="muted" style="margin-top:6px">Anzeigename ist nur 1x pro Monat änderbar – nächste Änderung ab <b>${h(dnNext)}</b>. Ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : ""}
-        ${!robloxEditable ? `<div class="muted" style="margin-top:6px">Roblox-Name ist nur alle 6 Monate änderbar – ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : ""}
+        ${!robloxEnabled ? `<div class="muted" style="margin-top:6px">Roblox-Name ist nur alle 6 Monate änderbar – ein Supervisor kann ihn im Nutzer-Tab anpassen.</div>` : (isSup() && !robloxEditable ? `<div class="muted" style="margin-top:6px">Als Supervisor kannst du deinen Roblox-Name jederzeit ändern.</div>` : "")}
         <div style="margin-top:12px">
           <button class="btn btn-green" onclick="VBG.saveProfile()">Profil speichern</button>
           <span class="muted" style="margin-left:8px">Profilbild wird direkt beim Speichern übernommen.</span>
@@ -2060,8 +2061,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
             <option value="supervisor" ${u.role === "supervisor" ? "selected" : ""}>Supervisor</option>
           </select></label>
           <label>Discord Name<input id="eu-discord" value="${h(u.discordName || "")}"/></label>
-          <label>Roblox Name<input id="eu-roblox" value="${h(u.robloxName || "")}" ${robloxReadonly && !u.protected ? "disabled" : ""}/>
-            <span class="muted" style="font-size:11px">${robloxReadonly ? "noch nicht abgelaufen (6 Monate)" : "änderbar"}</span>
+          <label>Roblox Name<input id="eu-roblox" value="${h(u.robloxName || "")}"/>
+            <span class="muted" style="font-size:11px">${robloxReadonly ? "noch nicht abgelaufen (6 Monate) – als Supervisor trotzdem änderbar" : "änderbar"}</span>
           </label>
           <label>Sprache<select id="eu-lang"><option value="de" ${u.language !== "en" ? "selected" : ""}>Deutsch</option><option value="en" ${u.language === "en" ? "selected" : ""}>English</option></select></label>
           <label>Anzeigename<input id="eu-displayname" value="${h(u.displayName || "")}" placeholder="z. B. Präsenz-Name"/></label>
