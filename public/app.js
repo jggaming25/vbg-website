@@ -126,7 +126,7 @@
     latestAnnounce: null,
     // Filter
     appFilter: { nutzer: "", shift: "" },
-    activityRange: "woche",
+    activityRange: "monat",
     nichtDienlich: "vehicles", // unused Platzhalter
   };
 
@@ -331,7 +331,7 @@
             </div>`).join("")}
         </div>` : ""}
 
-      <div class="container">
+      <div class="container" style="margin-top:18px">
         <h2>Schnellzugriff</h2>
         <div class="flex">
           <button class="btn" onclick="VBG.setView('shiftplan')">Zum Shiftplan</button>
@@ -400,9 +400,9 @@
             <input id="sf-start" type="time" value="${h(s ? s.startTime || "" : "")}"/></label>
           <label>Endzeit
             <input id="sf-end" type="time" value="${h(s ? s.endTime || "" : "")}"/></label>
-          <label>Notizen
-            <input id="sf-notes" value="${h(s ? s.notes || "" : "")}"/></label>
         </div>
+
+        <label style="display:block;margin-top:12px">Notizen<textarea id="sf-notes" rows="4" placeholder="z. B. besondere Umläufe, Linienwechsel, Bemerkungen…" style="width:100%;margin-top:6px;resize:vertical">${h(s ? s.notes || "" : "")}</textarea></label>
 
         <fieldset><legend>Host (Haupt-Supervisor)</legend>
           <select id="sf-host">${supers.map((u) => `<option value="${u.id}" ${(s && s.hostId === u.id) || (!s && u.id === state.user.id) ? "selected" : ""}>${h(u.username)}</option>`).join("")}</select>
@@ -687,7 +687,7 @@
           </select></label>` : ""}
           <label>Von (Uhrzeit)<input id="an-von" type="time"/></label>
           <label>Bis (Uhrzeit)<input id="an-bis" type="time"/></label>
-          <label>Hinweis<input id="an-hinweis" placeholder="freiwillig, z. B. nur Vormittag"/></label>
+          <label style="display:block;margin-top:10px">Hinweis<textarea id="an-hinweis" rows="3" placeholder="freiwillig, z. B. nur Vormittag, kein Gelenkbus…" style="width:100%;margin-top:6px;resize:vertical"></textarea></label>
         </div>
 
         <div class="muted" style="margin:10px 0">
@@ -722,28 +722,46 @@
   async function loadActivityMe() {
     try { return await api("GET", "/api/activity/me"); } catch (e) { return null; }
   }
+  async function loadActivityMeMonth() {
+    try { return await api("GET", "/api/activity/me?zeitraum=monat"); } catch (e) { return null; }
+  }
   async function loadActivityAll() {
     try { return await api("GET", "/api/activity/all?zeitraum=" + state.activityRange); } catch (e) { return null; }
   }
 
   function renderActivity() {
-    if (isSup()) return activityAllView();
     return activityMeView();
   }
 
   function activityMeView() {
     const me = state.actMe;
-    if (!me) {
-      loadActivityMe().then((r) => { state.actMe = r; render(); });
+    const month = state.actMeMonth;
+    if (!me || !month) {
+      Promise.all([loadActivityMe(), loadActivityMeMonth()]).then(([r, m]) => {
+        state.actMe = r; state.actMeMonth = m; render();
+      });
       return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
     }
     const bereit = me.fahrMin >= 60;
+    const MOENTLICHES_ZIEL = 240; // mind. 4 h gefahrene Zeit pro Kalendermonat
+    const monFahr = month.fahrMin || 0;
+    const monOk = monFahr >= MOENTLICHES_ZIEL;
+    const monRest = Math.max(0, MOENTLICHES_ZIEL - monFahr);
     return `
       <h2>Activity</h2>
       <div class="card-grid">
         <div class="stat"><div class="num">${fmtMin(me.activityMin || 0)}</div><div class="lbl">Activity-Zeit (60 % deiner Fahrzeit)</div></div>
         <div class="stat"><div class="num">${fmtMin(me.fahrMin || 0)}</div><div class="lbl">Reine Fahrzeit (ohne Pausen)</div></div>
         <div class="stat"><div class="num">${(me.signups || []).length}</div><div class="lbl">Activity-Anmeldungen</div></div>
+      </div>
+      <div class="container" style="border-color:${monOk ? "var(--green)" : "var(--yellow)"}">
+        <b>Monatsziel: mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit</b>
+        <div class="muted" style="margin-top:4px">
+          Diesen Monat: <b>${fmtMin(monFahr)}</b>
+          ${monOk
+            ? `<span class="badge green" style="margin-left:8px">Ziel erreicht ✓</span>`
+            : `<span class="badge yellow" style="margin-left:8px">Noch ${fmtMin(monRest)} bis zum Ziel</span>`}
+        </div>
       </div>
       <div class="container">
         <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten reine Fahrzeit
@@ -758,8 +776,25 @@
     const rows = state.actAll;
     if (!rows) {
       loadActivityAll().then((r) => { state.actAll = r; render(); });
-      return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
+      return `<h2>Activity – alle Nutzer</h2><div class="spinner">Lade…</div>`;
     }
+    const MOENTLICHES_ZIEL = 240; // mind. 4 h gefahrene Zeit pro Kalendermonat
+    const mono = state.activityRange === "monat";
+    const gefaehrdet = mono ? rows.rows.filter((r) => r.role !== "supervisor" && (r.fahrMin || 0) < MOENTLICHES_ZIEL) : [];
+    const gefaehrdetHtml = mono ? `
+      <div class="container" style="border-color:${gefaehrdet.length ? "var(--red)" : "var(--green)"}">
+        <h2 style="margin:0">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)</h2>
+        ${gefaehrdet.length === 0
+          ? `<p class="muted" style="margin:8px 0 0">Alle Busfahrer erreichen das Monatsziel. Keiner gefährdet. ✓</p>`
+          : `<div style="margin-top:8px">${gefaehrdet.map((r, i) => `
+              <div class="flex" style="padding:6px 0;border-top:1px solid var(--border)">
+                <span><b>${h(r.username)}</b> <span class="muted">(${h(r.roleLabel || "")})</span></span>
+                <span class="badge red">Gefährdet</span>
+                <span class="muted">${fmtMin(r.fahrMin || 0)} gefahren – noch ${fmtMin(MOENTLICHES_ZIEL - (r.fahrMin || 0))} bis Monatsziel</span>
+              </div>`).join("")}
+            <p class="muted" style="margin:10px 0 0">Bewertung pro Kalendermonat; unterhalb von ${fmtMin(MOENTLICHES_ZIEL)} gilt eine Person als gefährdet.</p>
+          </div>`}
+      </div>` : "";
     return `
       <h2>Activity – alle Nutzer</h2>
       <div class="flex" style="margin-bottom:14px">
@@ -772,6 +807,7 @@
           </select>
         </label>
       </div>
+      ${gefaehrdetHtml}
       <div class="container">
         <table>
           <thead><tr><th>Nutzer</th><th>Rolle</th><th>Reine Fahrzeit</th><th>Activity (60 %)</th><th>Anmeldungen</th></tr></thead>
@@ -857,12 +893,13 @@
         <p class="muted">Lizenzen werden den Personen im Tab <b>Nutzer</b> zugewiesen.
         Hier legst du die Linien mit Namen und Beschreibung an bzw. änderst sie.</p>
         <table>
-          <thead><tr><th>Name</th><th>Beschreibung</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Beschreibung</th><th>Haltestellen</th><th></th></tr></thead>
           <tbody>
             ${state.cats.linien.map((l) => `
               <tr>
                 <td><b>${h(l.name)}</b></td>
                 <td>${h(l.beschreibung || "")}</td>
+                <td ${(l.stopsHin || []).length || (l.stopsRueck || []).length ? `title="${h(stopSummary(l))}"` : ""}>${(l.stopsHin || []).length} Hin · ${(l.stopsRueck || []).length} Rück</td>
                 <td>
                   <button class="btn btn-ghost btn-xs" onclick="VBG.editLinie('${l.id}')">Bearbeiten</button>
                   <button class="btn btn-danger btn-xs" onclick="VBG.delLinie('${l.id}')">Löschen</button>
@@ -1633,18 +1670,59 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
           <label>Name<input id="nl-name" placeholder="z. B. (SB) 24"/></label>
           <label>Beschreibung<input id="nl-desc" placeholder="z. B. Schnellbus, Nachtbus, …"/></label>
         </div>
+        <div id="stops-ed-hin"></div>
+        <div id="stops-ed-rueck"></div>
         <div class="flex" style="margin-top:8px">
           <button class="btn btn-green" onclick="VBG.createLinie()">Anlegen</button>
           <button class="btn btn-ghost" onclick="document.getElementById('linie-form').innerHTML=''">Abbrechen</button>
         </div>
       </div>`;
+    renderStopsEditor("hin", []);
+    renderStopsEditor("rueck", []);
+  }
+  function renderStopsEditor(dir, values) {
+    const wrap = document.getElementById("stops-ed-" + dir);
+    if (!wrap) return;
+    const title = dir === "hin" ? "Hinweg – Haltestellen & Fahrzeiten" : "Rückweg – Haltestellen & Fahrzeiten";
+    const rows = values.length ? values : [{ station: "", min: 0 }];
+    wrap.innerHTML = `
+      <fieldset style="margin-top:12px"><legend>${title}</legend>
+        ${rows.map((r, i) => `
+          <div style="display:flex;gap:8px;margin:6px 0;align-items:center">
+            <span class="muted" style="min-width:18px">${i + 1}.</span>
+            <input data-st-dir="${dir}" data-st-i="${i}" class="st-station" style="flex:1" placeholder="Haltestelle (${i === 0 ? "Start" : "Zwischenhalt"})" value="${h(r.station || "")}"/>
+            <input data-st-dir="${dir}" data-st-i="${i}" class="st-min" type="number" min="0" step="1" style="width:110px" placeholder="Min." value="${r.min || 0}"/>
+            <button class="btn btn-ghost btn-xs" onclick="VBG.removeStopRow('${dir}', ${i})" title="Haltestelle entfernen">×</button>
+          </div>`).join("")}
+        <button class="btn btn-sm" onclick="VBG.addStopRow('${dir}')">+ Haltestelle</button>
+        <span class="muted" style="margin-left:10px;font-size:12px">Min. = Fahrzeit ab Starthaltepunkt</span>
+      </fieldset>`;
+  }
+  function stopValues(dir) {
+    return stopValuesRaw(dir).filter((x) => x.station);
+  }
+  function stopValuesRaw(dir) {
+    return Array.from(document.querySelectorAll('.st-station[data-st-dir="' + dir + '"]')).map((el, i) => ({
+      station: (el.value || "").trim(),
+      min: parseInt((document.querySelectorAll('.st-min[data-st-dir="' + dir + '"]')[i] || {}).value, 10) || 0,
+    }));
+  }
+  function addStopRow(dir) {
+    renderStopsEditor(dir, stopValuesRaw(dir).concat([{ station: "", min: 0 }]));
+  }
+  function removeStopRow(dir, i) {
+    const v = stopValuesRaw(dir);
+    v.splice(i, 1);
+    renderStopsEditor(dir, v);
   }
   async function createLinie() {
     const name = document.getElementById("nl-name").value.trim();
     const beschreibung = document.getElementById("nl-desc").value.trim();
     if (!name) { toast("Name fehlt", "err"); return; }
-    try { await api("POST", "/api/linien", { name, beschreibung }); toast("Linie angelegt", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render(); }
-    catch (e) { toast(e.message, "err"); }
+    try {
+      await api("POST", "/api/linien", { name, beschreibung, stopsHin: stopValues("hin"), stopsRueck: stopValues("rueck") });
+      toast("Linie angelegt", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render();
+    } catch (e) { toast(e.message, "err"); }
   }
   function editLinie(id) {
     const l = state.cats.linien.find((x) => x.id === id);
@@ -1656,17 +1734,29 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
           <label>Name<input id="el-name" value="${h(l.name)}"/></label>
           <label>Beschreibung<input id="el-desc" value="${h(l.beschreibung || "")}" placeholder="z. B. Schnellbus, Nachtbus"/></label>
         </div>
+        <div id="stops-ed-hin"></div>
+        <div id="stops-ed-rueck"></div>
         <div class="flex" style="margin-top:8px">
           <button class="btn btn-green" onclick="VBG.saveLinie('${l.id}')">Speichern</button>
           <button class="btn btn-ghost" onclick="document.getElementById('linie-form').innerHTML=''">Abbrechen</button>
         </div>
       </div>`;
+    renderStopsEditor("hin", l.stopsHin || []);
+    renderStopsEditor("rueck", l.stopsRueck || []);
   }
   async function saveLinie(id) {
     const name = document.getElementById("el-name").value.trim();
     const beschreibung = document.getElementById("el-desc").value.trim();
-    try { await api("PATCH", "/api/linien/" + id, { name, beschreibung }); toast("Gespeichert", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render(); }
-    catch (e) { toast(e.message, "err"); }
+    try {
+      await api("PATCH", "/api/linien/" + id, { name, beschreibung, stopsHin: stopValues("hin"), stopsRueck: stopValues("rueck") });
+      toast("Gespeichert", "ok"); document.getElementById("linie-form").innerHTML = ""; await loadCats(); render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  function stopSummary(l) {
+    const a = l.stopsHin || [];
+    const b = l.stopsRueck || [];
+    const line = (arr) => arr.map((s) => s.station).join(" → ");
+    return `${a.length} Hin · ${b.length} Rück${a.length ? " | Hin: " + line(a) : ""}${b.length ? " | Rück: " + line(b) : ""}`;
   }
   async function delLinie(id) {
     if (!confirm("Linie löschen? (Nutzern zugewiesene Lizenzen bleiben erhalten)") ) return;
@@ -1789,11 +1879,13 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       if (!state.user) return;
       await loadNotifs();
       await checkAnnouncements();
-      if (state.view === "shiftplan" && state.planShiftId) await loadPlan();
+      if (state.view === "shiftplan" && state.planShiftId) {
+        await loadPlan();
+        const main = document.querySelector("main");
+        if (main) main.innerHTML = renderView();
+      }
       if (state.view === "account") await loadProfile();
       if (state.view === "supervisor" && state.superTab === "anmeldungen") await loadAppsAll();
-      const main = document.querySelector("main");
-      if (main) main.innerHTML = renderView();
     }, 20000);
   }
 
@@ -1828,6 +1920,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     signupActivity,
     showUserForm, createUser, copyPwResult, editUser, saveUserEdit, strafe, resetPw, toggleSuspend, deleteUser,
     showLinieForm, createLinie, editLinie, saveLinie, delLinie,
+    addStopRow, removeStopRow,
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop,
   };

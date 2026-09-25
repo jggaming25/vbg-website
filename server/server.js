@@ -493,6 +493,17 @@ app.post("/api/users/:id/strafstunden", requireAuth, requireSupervisor, (req, re
 
 // ---------- Linien (Lizenzen) ----------
 
+function sanitizeStops(v) {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => {
+      const station = String((x && (x.station || x.name)) || "").trim();
+      if (!station) return null;
+      return { station, min: Math.max(0, Number(x && x.min) || 0) };
+    })
+    .filter(Boolean);
+}
+
 app.get("/api/linien", requireAuth, (req, res) => res.json({ items: db.load().linien }));
 
 app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
@@ -503,6 +514,8 @@ app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
     id: uid(),
     name,
     beschreibung: (req.body && req.body.beschreibung || "").trim(),
+    stopsHin: sanitizeStops(req.body && req.body.stopsHin),
+    stopsRueck: sanitizeStops(req.body && req.body.stopsRueck),
   };
   data.linien.push(item);
   db.save();
@@ -515,6 +528,8 @@ app.patch("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
   if (!l) return res.status(404).json({ error: "Linie nicht gefunden" });
   if (typeof req.body.name === "string") l.name = req.body.name.trim();
   if (typeof req.body.beschreibung === "string") l.beschreibung = req.body.beschreibung.trim();
+  if (req.body.stopsHin !== undefined) l.stopsHin = sanitizeStops(req.body.stopsHin);
+  if (req.body.stopsRueck !== undefined) l.stopsRueck = sanitizeStops(req.body.stopsRueck);
   db.save();
   res.json({ item: l });
 });
@@ -1152,8 +1167,21 @@ app.delete("/api/kundenservice/:id", requireAuth, requireSupervisor, (req, res) 
 
 // ---------- Activity (60 % reine Fahrzeit, ohne Pausen) ----------
 
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// Startdatum (YYYY-MM-DD) des gewählten Zeitraums; monat = Anfang des aktuellen Kalendermonats
+function zeitraumFrom(zeitraum) {
+  const now = new Date();
+  if (zeitraum === "monat") return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`;
+  const d = new Date(now);
+  if (zeitraum === "woche") d.setDate(now.getDate() - 7);
+  else if (zeitraum === "jahr") d.setFullYear(now.getFullYear() - 1);
+  else return null;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 // Reine Fahrzeit je Nutzer aus Zuteilungen (Dutys + Einzelfahrten)
-function fahrZeitData() {
+function fahrZeitData(fromDateStr) {
   const data = db.load();
   const proUser = {};
   data.users.forEach((u) => (proUser[u.id] = { userId: u.id, fahrMin: 0, spanneMin: 0, activityMin: 0 }));
@@ -1166,6 +1194,8 @@ function fahrZeitData() {
 
   data.duties.forEach((d) => {
     if (d.cancelled) return;
+    const dDate = d.date || ((data.shifts.find((s) => s.id === d.shiftId) || {}).date) || "";
+    if (fromDateStr && dDate && dDate < fromDateStr) return;
     if (d.assignedUserId) {
       const trips = d.trips.filter((t) => !t.cancelled && !t.leerfahrt);
       if (trips.length) {
@@ -1186,12 +1216,13 @@ function fahrZeitData() {
 
 app.get("/api/activity/me", requireAuth, (req, res) => {
   const data = db.load();
-  const proUser = fahrZeitData();
+  const fromDateStr = zeitraumFrom(req.query.zeitraum);
+  const proUser = fahrZeitData(fromDateStr);
   const me = proUser[req.user.id] || { userId: req.user.id, fahrMin: 0, spanneMin: 0, activityMin: 0 };
   const signups = data.activity
-    .filter((a) => a.userId === req.user.id)
+    .filter((a) => a.userId === req.user.id && (!fromDateStr || (a.createdAt || "").slice(0, 10) >= fromDateStr))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  res.json({ ...me, signups });
+  res.json({ ...me, signups, from: fromDateStr });
 });
 
 app.post("/api/activity/signup", requireAuth, (req, res) => {
@@ -1215,24 +1246,18 @@ app.post("/api/activity/signup", requireAuth, (req, res) => {
 app.get("/api/activity/all", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const { zeitraum } = req.query || {}; // woche | monat | jahr | alle
-  const now = new Date();
-  const iso = now.toISOString().slice(0, 10);
-  const cutoff = new Date(now);
-  if (zeitraum === "woche") cutoff.setDate(now.getDate() - 7);
-  else if (zeitraum === "monat") cutoff.setMonth(now.getMonth() - 1);
-  else if (zeitraum === "jahr") cutoff.setFullYear(now.getFullYear() - 1);
-  const fromIso = zeitraum && zeitraum !== "alle" ? cutoff.toISOString() : null;
+  const fromDateStr = zeitraumFrom(zeitraum);
 
-  const proUser = fahrZeitData();
+  const proUser = fahrZeitData(fromDateStr);
   const rows = data.users.map((u) => ({
     ...proUser[u.id],
     username: u.username,
     roleLabel: roleLabel(u.role),
     signups: u.role === "supervisor" ? [] : data.activity
-      .filter((a) => a.userId === u.id && (!fromIso || a.createdAt >= fromIso))
+      .filter((a) => a.userId === u.id && (!fromDateStr || (a.createdAt || "").slice(0, 10) >= fromDateStr))
       .length,
   }));
-  res.json({ zeitraum: zeitraum || "alle", rows });
+  res.json({ zeitraum: zeitraum || "alle", from: fromDateStr, rows });
 });
 
 // ---------- Nachrichten (Supervisor → Alle/Busfahrer/Senior) ----------

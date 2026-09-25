@@ -146,6 +146,8 @@ function load() {
     if (!l.beschreibung && l.label) { l.beschreibung = l.label; delete l.label; }
     if (!l.beschreibung) l.beschreibung = "";
     if (!l.name) l.name = "";
+    if (!Array.isArray(l.stopsHin)) l.stopsHin = [];
+    if (!Array.isArray(l.stopsRueck)) l.stopsRueck = [];
   });
 
   // Shifts: Host + Co-Supervisoren
