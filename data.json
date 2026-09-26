@@ -284,9 +284,9 @@
       "bemerkung": ""
     },
     {
-      "id": "48644ee5-4b0e-497d-b293-16720f9c1a95",
-      "wagennummer": "2504",
-      "kennzeichen": "GV-VB 2504",
+      "id": "ad6a7121-7896-4467-ae66-bcb9d83afee9",
+      "wagennummer": "2503",
+      "kennzeichen": "GV-VB 2503",
       "typ": "Bus",
       "art": "",
       "status": "einsatzbereit",
@@ -294,9 +294,9 @@
       "bemerkung": "LE"
     },
     {
-      "id": "ad6a7121-7896-4467-ae66-bcb9d83afee9",
-      "wagennummer": "2503",
-      "kennzeichen": "GV-VB 2503",
+      "id": "48644ee5-4b0e-497d-b293-16720f9c1a95",
+      "wagennummer": "2504",
+      "kennzeichen": "GV-VB 2504",
       "typ": "Bus",
       "art": "",
       "status": "einsatzbereit",
@@ -63894,6 +63894,14 @@
       "action": "Fahrzeugliste sortiert",
       "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2504 – 2503 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
       "createdAt": "2026-09-26T11:51:22.204Z"
+    },
+    {
+      "id": "b86ab0a9-6d7d-4841-8963-a821b395bcd9",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2504 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T11:51:26.997Z"
     }
   ],
   "_vapid": {
