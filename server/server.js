@@ -1958,8 +1958,13 @@ app.post("/api/activity/signup", requireAuth, (req, res) => {
   const user = req.user;
   const proUser = fahrZeitData();
   const me = proUser[user.id];
-  if (!me || (me.activityMin || 0) < 60) {
-    return res.status(400).json({ error: "Mindestens 60 Minuten Activity-Zeit nötig (entspricht 100 Min reiner Fahrzeit, 60 % werden angerechnet)" });
+  // 60% der gesamten Shift-Zeit (spanneMin) müssen reine Fahrzeit (fahrMin) sein
+  const fahrMin = me.fahrMin || 0;
+  const spanneMin = me.spanneMin || 0;
+  const threshold = Math.round(spanneMin * 0.6);
+  if (!me || fahrMin < threshold) {
+    const noch = Math.max(0, threshold - fahrMin);
+    return res.status(400).json({ error: `Mindestens ${fmtMin(threshold)} reine Fahrzeit nötig (60 % der gesamten Shift-Zeit ${fmtMin(spanneMin)}). Noch ${fmtMin(noch)} fehlen.` });
   }
   data.activity.push({
     id: uid(), userId: user.id,

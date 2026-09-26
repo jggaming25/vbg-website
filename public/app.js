@@ -1124,7 +1124,10 @@ function superProtokollView() {
       }
       return `<h2>Activity</h2><div class="spinner">Lade…</div>`;
     }
-    const bereit = me.fahrMin >= 60;
+    const fahrMin = me.fahrMin || 0;
+    const spanneMin = me.spanneMin || 0;
+    const threshold = Math.round(spanneMin * 0.6);
+    const bereit = fahrMin >= threshold;
     const MOENTLICHES_ZIEL = 240;
     const monFahr = month.fahrMin || 0;
     const monOk = monFahr >= MOENTLICHES_ZIEL;
@@ -1159,16 +1162,16 @@ function superProtokollView() {
       <div class="card-grid">
         <div class="stat"><div class="num">${fmtMin(me.activityMin || 0)}</div><div class="lbl">Activity-Zeit (60 % deiner Fahrzeit)</div></div>
         <div class="stat"><div class="num">${fmtMin(shiftplanFahrMin)}</div><div class="lbl">Reine Fahrzeit lt. Shiftplan</div></div>
+        <div class="stat"><div class="num">${fmtMin(me.spanneMin || 0)}</div><div class="lbl">Gesamte Shift-Zeit (mit Pausen)</div></div>
         ${deadlineHtml}
         <div class="stat"><div class="num">${(me.signups || []).length}</div><div class="lbl">Activity-Anmeldungen</div></div>
         <div class="stat"><div class="num" style="color:${monOk ? "var(--green)" : "var(--yellow)"}">${monOk ? "✓ " + fmtMin(monFahr) : fmtMin(monFahr)}</div>
           <div class="lbl">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)${monOk ? " – erreicht" : ` – noch ${fmtMin(monRest)}`}</div></div>
       </div>
       <div class="container">
-        <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten Activity-Zeit
-        (entspricht 100 Min reiner Fahrzeit, 60&nbsp;% werden angerechnet) erreicht hast.</p>
+        <p class="muted">Du kannst dich für Activity anmelden, sobald deine reine Fahrzeit <b>60&nbsp;% der gesamten Shift-Zeit</b> (mit Pausen) erreicht hat.</p>
         <button class="btn btn-yellow" ${bereit ? "" : "disabled"} onclick="VBG.signupActivity()">
-          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (braucht 60 min Activity-Zeit)"}
+          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (60 % der Shift-Zeit als Fahrzeit nötig)"}
         </button>
       </div>`;
   }
