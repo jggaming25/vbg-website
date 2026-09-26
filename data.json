@@ -57,7 +57,7 @@
     {
       "id": "730722eb-5f52-4389-adf2-e8f87f822fea",
       "username": "Lkw448",
-      "passwordHash": "$2a$10$zYPHRqlkfrtaHAMZkjAqgeu0sejN62ozehr.2tS0YWgUtR/vz4v32",
+      "passwordHash": "$2a$10$dRzDVCOnEYzI4hOWi/H.pO28HPm4BKbAvyxCM3X0lXvp6FOHnWtvO",
       "role": "supervisor",
       "linien": [
         "lin19",
@@ -77,8 +77,9 @@
       "language": "de",
       "avatar": "",
       "suspended": false,
-      "mustChangePassword": true,
-      "createdAt": "2026-09-26T11:36:46.287Z"
+      "mustChangePassword": false,
+      "createdAt": "2026-09-26T11:36:46.287Z",
+      "passwordChangedAt": "2026-09-26T11:37:46.097Z"
     }
   ],
   "linien": [
@@ -63376,26 +63377,7 @@
       "endTime": ""
     }
   ],
-  "activity": [
-    {
-      "id": "5918fbaa-49b2-4b6a-a427-2eda8ad0e73b",
-      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
-      "von": "2026-09-26T11:21",
-      "createdAt": "2026-09-26T11:21:50.033Z"
-    },
-    {
-      "id": "fbcb27bf-de53-45e9-8f1e-9fe5ce0349f1",
-      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
-      "von": "2026-09-26T11:21",
-      "createdAt": "2026-09-26T11:21:59.115Z"
-    },
-    {
-      "id": "35986b6e-54cc-4a2e-af58-913dfe63246e",
-      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
-      "von": "2026-09-26T11:22",
-      "createdAt": "2026-09-26T11:22:00.412Z"
-    }
-  ],
+  "activity": [],
   "notifications": [
     {
       "id": "ad18b760-23d2-49a4-8f90-ab95f2c979ab",
@@ -63700,6 +63682,38 @@
       "action": "Anmeldung gelöscht",
       "detail": "Schwarzfahrer001 · bus",
       "createdAt": "2026-09-26T11:35:47.674Z"
+    },
+    {
+      "id": "20f5cee9-6584-4b8b-8e98-140f2f7cc033",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Activity gelöscht",
+      "detail": "5918fbaa-49b2-4b6a-a427-2eda8ad0e73b",
+      "createdAt": "2026-09-26T11:37:45.583Z"
+    },
+    {
+      "id": "205ec0b6-2823-4bb2-adc7-930c33da8eab",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Activity gelöscht",
+      "detail": "fbcb27bf-de53-45e9-8f1e-9fe5ce0349f1",
+      "createdAt": "2026-09-26T11:37:45.993Z"
+    },
+    {
+      "id": "3dfc524f-cb10-4ac0-a84c-27a6d9af5cef",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "Lkw448",
+      "action": "Passwort geändert",
+      "detail": "Lkw448",
+      "createdAt": "2026-09-26T11:37:46.182Z"
+    },
+    {
+      "id": "9a736a9a-0952-4372-90a0-03e2ce5e9408",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Activity gelöscht",
+      "detail": "35986b6e-54cc-4a2e-af58-913dfe63246e",
+      "createdAt": "2026-09-26T11:37:46.489Z"
     }
   ],
   "_vapid": {
