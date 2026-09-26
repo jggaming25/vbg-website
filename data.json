@@ -254,6 +254,16 @@
       "bemerkung": ""
     },
     {
+      "id": "aa09d27f-f3c5-4141-ae52-f9ebef41449a",
+      "wagennummer": "2005",
+      "kennzeichen": "GV-VB 2005",
+      "typ": "Bus",
+      "art": "Gelenk",
+      "status": "nicht_einsatzbereit",
+      "ort": "Betriebshof Neuenburg",
+      "bemerkung": "Derzeitiger Display-Defekt"
+    },
+    {
       "id": "8394cd38-957d-4316-a4a2-9feb7415967e",
       "wagennummer": "2501",
       "kennzeichen": "GV-VB 2501",
@@ -282,16 +292,6 @@
       "status": "einsatzbereit",
       "ort": "Gravenberg",
       "bemerkung": "LE"
-    },
-    {
-      "id": "aa09d27f-f3c5-4141-ae52-f9ebef41449a",
-      "wagennummer": "2005",
-      "kennzeichen": "GV-VB 2005",
-      "typ": "Bus",
-      "art": "Gelenk",
-      "status": "nicht_einsatzbereit",
-      "ort": "Betriebshof Neuenburg",
-      "bemerkung": "Derzeitiger Display-Defekt"
     },
     {
       "id": "09999c28-d96a-4229-9447-9ec1a9153d3c",
@@ -63812,6 +63812,14 @@
       "action": "Fahrzeugliste sortiert",
       "detail": "2088 – 2003 – 2004 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2005 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
       "createdAt": "2026-09-26T11:50:09.030Z"
+    },
+    {
+      "id": "7eca6de3-273e-4935-9321-137b0e99797b",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2005 – 2501 – 2502 – 2503 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T11:50:17.518Z"
     }
   ],
   "_vapid": {
