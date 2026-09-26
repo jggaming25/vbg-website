@@ -347,7 +347,14 @@ async function doCommit(content, h) {
 async function pushRemoteDb() {
   const token = process.env.VBG_GITHUB_TOKEN;
   if (!token) return { ok: false, error: "VBG_GITHUB_TOKEN nicht gesetzt" };
+  // Ensure all collections exist
+  if (!db.applications) db.applications = [];
+  if (!db.wishes) db.wishes = [];
+  if (!db.kundenservice) db.kundenservice = [];
+  if (!db.fahrtenbuch) db.fahrtenbuch = [];
+  if (!db.supervisorLog) db.supervisorLog = [];
   const content = JSON.stringify(db, null, 2);
+  console.log("[Backup] Collections:", Object.keys(db).filter(k => Array.isArray(db[k])).map(k => `${k}:${db[k].length}`).join(", "));
   const h = contentHash(content);
   try {
     const base = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/data.json`;
