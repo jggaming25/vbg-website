@@ -331,6 +331,7 @@ tr:last-child td { border-bottom: none; }
 .toast { background: var(--panel2); border: 1px solid var(--border); border-left: 4px solid var(--accent); padding: 10px 14px; border-radius: 8px; box-shadow: 0 10px 24px rgba(0,0,0,.4); min-width: 240px; max-width: 360px; animation: slideIn .2s ease; }
 .toast.err { border-left-color: var(--red); }
 .toast.ok { border-left-color: var(--green); }
+.toast.warn { border-left-color: var(--yellow, #e0a800); }
 @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 10px 0; }

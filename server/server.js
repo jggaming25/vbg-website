@@ -284,19 +284,32 @@ function effectiveVehicle(duty) {
   return t ? t.vehicleId : null;
 }
 
-// Standard-Bustypen, die eine Linie fest vorschreiben kann. Alles andere ist ein
-// frei definierter Typ ("Sonstige") und darf auf jede Linie gesetzt werden.
+// Bustyp eines Fahrzeugs: es gibt genau zwei, "Solo" und "Gelenk". Er steuert die
+// Linien-Prüfung (19/8 = Solo, 24/N1 = Gelenk). Die Bus-Bezeichnung selbst
+// (z. B. "Integro", "Mercedes-Benz C2") steht in fahrzeug.typ und wird
+// ausschließlich von Hand eingetragen.
 const STANDARD_BUSTYPEN = ["Solo", "Gelenk"];
+
+// Normalisiert einen Bustyp: erlaubt sind nur "Solo" und "Gelenk" (case-insensitiv).
+// Alles andere wird verworfen, damit keine Frei-Bezeichnungen in der
+// Linien-Prüfung landen. Liefert { art, error }.
+function normalizeBustyp(raw) {
+  const v = String(raw == null ? "" : raw).trim();
+  if (!v) return { art: "", error: null };
+  const treffer = STANDARD_BUSTYPEN.find((b) => b.toLowerCase() === v.toLowerCase());
+  if (!treffer) {
+    return { art: "", error: `Bustyp muss "${STANDARD_BUSTYPEN.join(" oder ")}" sein` };
+  }
+  return { art: treffer, error: null };
+}
 
 // Prüft Fahrzeugtyp gegen Linien-Vorgabe. Liefert null bei OK, sonst ein Fehlerobjekt.
 function vehicleTypeMismatch(line, vehicle) {
   if (!line || !line.requiredVehicleType) return null;
-  if (!vehicle || !vehicle.art) return null; // kein Typ gesetzt -> keine Prüfung
-  const istFrei = !STANDARD_BUSTYPEN.includes(vehicle.art);
-  if (istFrei) return null; // selbst definierter Typ -> passt auf jede Linie
+  if (!vehicle || !STANDARD_BUSTYPEN.includes(vehicle.art)) return null; // kein gültiger Bustyp -> keine Prüfung
   if (vehicle.art !== line.requiredVehicleType) {
     return {
-      error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
+      error: `Bustyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
       warning: true,
       lineRequired: line.requiredVehicleType,
       vehicleType: vehicle.art,
@@ -1168,11 +1181,15 @@ app.post("/api/fahrzeuge", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const wagennummer = (req.body && req.body.wagennummer || "").trim();
   if (!wagennummer) return res.status(400).json({ error: "Wagennummer fehlt" });
+  const { art, error: artErr } = normalizeBustyp(req.body && req.body.art);
+  if (artErr) return res.status(400).json({ error: artErr });
+  if (!art) return res.status(400).json({ error: 'Bustyp fehlt (nur "Solo" oder "Gelenk")' });
   const item = {
     id: uid(), wagennummer,
     kennzeichen: (req.body.kennzeichen || "").trim(),
+    // Typ = Bus-Bezeichnung, ausschliesslich Freitext (z. B. "Integro").
     typ: (req.body.typ || "").trim(),
-    art: (req.body.art || "").trim(),
+    art,
     status: (req.body.status || "einsatzbereit").trim(),
     ort: (req.body.ort || "").trim(),
     bemerkung: (req.body.bemerkung || "").trim(),
@@ -1192,8 +1209,12 @@ app.patch("/api/fahrzeuge/:id", requireAuth, requireSupervisor, (req, res) => {
   if (typeof ort === "string") fz.ort = ort;
   if (typeof bemerkung === "string") fz.bemerkung = bemerkung;
   if (typeof kennzeichen === "string") fz.kennzeichen = kennzeichen;
-  if (typeof typ === "string") fz.typ = typ;
-  if (typeof art === "string") fz.art = art;
+  if (typeof typ === "string") fz.typ = typ.trim();
+  if (typeof art === "string" && art.trim()) {
+    const { art: neu, error: artErr } = normalizeBustyp(art);
+    if (artErr) return res.status(400).json({ error: artErr });
+    fz.art = neu;
+  }
   audit(data, req.user, "Fahrzeug bearbeitet", (fz.wagennummer || fz.typ || fz.id));
   db.save();
   res.json({ item: fz });
@@ -1988,10 +2009,25 @@ app.post("/api/applications/:id/accept", requireAuth, requireSupervisor, (req, r
   const a = data.applications.find((x) => x.id === req.params.id);
   if (!a) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
   a.status = "accepted";
-  audit(data, req.user, "Anmeldung angenommen", (data.users.find((u) => u.id === a.userId) || {}).username + " · " + a.art + " · " + a.von + "–" + a.bis);
+  // Kundenservice: direkt auf die freien 30-Minuten-Slots legen, wenn am
+  // gewünschten Standort in der gewünschten Zeit noch alles frei ist.
+  const auto = ksAutoZuweisen(data, a);
+  const wer = (data.users.find((u) => u.id === a.userId) || {}).username;
+  audit(data, req.user, "Anmeldung angenommen", wer + " · " + a.art + " · " + a.von + "–" + a.bis);
+  if (auto.ok && auto.slots.length) {
+    const von = auto.slots[0].von;
+    const bis = auto.slots[auto.slots.length - 1].bis;
+    const standort = (data.kundenservice.find((k) => k.id === a.standortId) || {}).name || "Standort";
+    audit(data, req.user, "Kundenservice automatisch zugeteilt", `${wer} → ${standort} ${von}–${bis}`);
+    notify(a.userId, `Du bist für den Kundenservice am Standort ${standort} von ${von} bis ${bis} eingeteilt.`, "success");
+  } else {
+    notify(a.userId, "Deine Anmeldung wurde angenommen.", "success");
+  }
   db.save();
-  notify(a.userId, "Deine Anmeldung wurde angenommen.", "success");
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    ksAuto: auto.ok ? { zugeteilt: true, slots: auto.slots.map((s) => ({ von: s.von, bis: s.bis })) } : { zugeteilt: false, grund: auto.grund },
+  });
 });
 
 app.post("/api/applications/:id/deny", requireAuth, requireSupervisor, (req, res) => {
@@ -2119,6 +2155,85 @@ function ksBuildSlots(standort, shift) {
 // hinter "22:00" einsortiert wird und nicht davor.
 function ksSlotOffset(von, startMin) {
   return ((toMin(von) - startMin) % 1440 + 1440) % 1440;
+}
+
+// Dauer eines "von–bis"-Fensters in Minuten; über Mitternacht hinweg.
+function ksDauerMin(von, bis) {
+  const a = toMin(von);
+  const b = toMin(bis);
+  if (a == null || b == null) return 0;
+  return b <= a ? b + 1440 - a : b - a;
+}
+
+// Alle Slots, die das angefragte Zeitfenster vollständig abdecken – in
+// chronologischer Reihenfolge. Erzeugt die Slots bei Bedarf.
+function ksSlotsFuerFenster(data, standortId, shiftId, von, bis) {
+  const standort = data.kundenservice.find((k) => k.id === standortId);
+  if (!standort || !von || !bis) return [];
+  const shift = shiftId ? data.shifts.find((s) => s.id === shiftId) : null;
+  const { startMin } = ksBuildSlots(standort, shift);
+  const alle = ksSlotsFor(data, standortId, shiftId);
+  const vonOff = ksSlotOffset(von, startMin);
+  const bisOff = vonOff + ksDauerMin(von, bis);
+  return alle.filter((s) => {
+    const off = ksSlotOffset(s.von, startMin);
+    return off >= vonOff && off + KS_SLOT_MIN <= bisOff;
+  });
+}
+
+// Auto-Zuteilung: sobald eine Kundenservice-Anmeldung angenommen wird und am
+// gewünschten Standort in der gewünschten Zeit noch alles frei ist, wird sie
+// direkt auf die passenden 30-Minuten-Slots gelegt. Nur wenn etwas belegt ist
+// oder die Person kollidiert, bleibt die manuelle Zuteilung nötig.
+// Liefert { ok, slots } bzw. { ok:false, grund }.
+function ksAutoZuweisen(data, anmeldung) {
+  if (!anmeldung || anmeldung.art !== "kundenservice") return { ok: false, grund: "keine Kundenservice-Anmeldung" };
+  const standort = data.kundenservice.find((k) => k.id === anmeldung.standortId);
+  if (!standort) return { ok: false, grund: "Standort nicht gefunden" };
+
+  // bereits eingeteilt -> nicht verschieben
+  const bestehend = (data.ksSlots || []).filter((s) => s.belegtVon === anmeldung.id);
+  if (bestehend.length) {
+    return { ok: false, grund: "bereits eingeteilt", slots: bestehend };
+  }
+
+  const ziel = ksSlotsFuerFenster(data, anmeldung.standortId, anmeldung.shiftId, anmeldung.von, anmeldung.bis);
+  if (!ziel.length) return { ok: false, grund: "keine passenden 30-Minuten-Slots vorhanden" };
+
+  const belegt = ziel.filter((s) => s.belegtVon);
+  if (belegt.length) {
+    const erst = belegt[0];
+    return { ok: false, grund: `${standort.name} ${erst.von}–${erst.bis} ist schon belegt`, slots: erst };
+  }
+
+  // Zeitüberschneidung mit einem anderen Slot derselben Person
+  if (anmeldung.userId) {
+    const standort2 = data.kundenservice.find((k) => k.id === anmeldung.standortId);
+    const shift = anmeldung.shiftId ? data.shifts.find((s) => s.id === anmeldung.shiftId) : null;
+    const { startMin } = ksBuildSlots(standort2, shift);
+    const zielIds = new Set(ziel.map((s) => s.id));
+    const vonOff = ksSlotOffset(anmeldung.von, startMin);
+    const bisOff = vonOff + ksDauerMin(anmeldung.von, anmeldung.bis);
+    const konflikt = (data.ksSlots || []).find((s) => {
+      if (!s.belegtVon || zielIds.has(s.id)) return false;
+      const a2 = data.applications.find((x) => x.id === s.belegtVon);
+      if (!a2 || a2.userId !== anmeldung.userId) return false;
+      if ((a2.shiftId || "") !== (anmeldung.shiftId || "")) return false;
+      const o1 = ksSlotOffset(s.von, startMin);
+      return o1 < bisOff && vonOff < o1 + KS_SLOT_MIN;
+    });
+    if (konflikt) {
+      const a2 = data.applications.find((x) => x.id === konflikt.belegtVon);
+      const name2 = a2 ? (publicUser(data.users.find((u) => u.id === anmeldung.userId) || {}) || {}).username : "die Person";
+      return { ok: false, grund: `${name2} ist in diesem Shift schon ${konflikt.von}–${konflikt.bis} eingeteilt` };
+    }
+  }
+
+  ziel.forEach((s) => { s.belegtVon = anmeldung.id; s.applicationId = anmeldung.id; });
+  // Anmeldung als zugeteilt markieren (erster Slot = Bezug für die Anzeige)
+  anmeldung.ksSlotId = ziel[0].id;
+  anmeldung.standortId = anmeldung.standortId || ziel[0].standortId;
+  return { ok: true, slots: ziel };
 }
 
 // Slots eines Standorts holen (erzeugt sie bei Bedarf einmalig und speichert sie)

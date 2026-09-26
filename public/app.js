@@ -214,38 +214,30 @@
     reserve: { label: "Reserve", cls: "gray" },
   };
   // Bustyp (Fahrzeug.art) – steuert die Linien-Prüfung (19/8 = Solo, 24/N1 = Gelenk).
-  // "Sonstige" erlaubt eine frei eingebbare Bezeichnung.
-  const BUSTYP_SONSTIGE = "__sonstige__";
-  const BUSTYP_OPTIONS = ["Solo", "Gelenk", BUSTYP_SONSTIGE];
+  // Festes Auswahlfeld: es gibt genau zwei Bustypen, "Sonstige" gibt es nicht mehr.
+  // Die Bus-Bezeichnung (z. B. "Integro", "Mercedes-Benz C2") steht in TYP und
+  // wird ausschließlich von Hand eingetragen.
+  const BUSTYP_OPTIONS = ["Solo", "Gelenk"];
   const bustypLabel = (art) => (art ? String(art) : "–");
-  // HTML für Bustyp-Auswahl + bedingtes Freitextfeld
-  function bustypField(prefix, current) {
+  // HTML für Bustyp-Auswahl (nur Solo/Gelenk) + Typ-Freitextfeld
+  function bustypField(prefix, current, currentTyp) {
     const cur = current || "";
-    const isSonstige = cur && !["Solo", "Gelenk"].includes(cur);
-    const opts = ["Solo", "Gelenk"].map((o) =>
+    const opts = BUSTYP_OPTIONS.map((o) =>
       `<option value="${o}" ${cur === o ? "selected" : ""}>${o}</option>`).join("");
     return `
-      <label>Bustyp<select id="${prefix}-art" onchange="VBG.toggleBustypFrei('${prefix}')">
+      <label>Bustyp<select id="${prefix}-art">
+        <option value="" ${cur ? "" : "selected"}>– bitte wählen –</option>
         ${opts}
-        <option value="${BUSTYP_SONSTIGE}" ${isSonstige ? "selected" : ""}>Sonstige…</option>
       </select></label>
-      <label id="${prefix}-art-frei-wrap" style="${isSonstige ? "" : "display:none"}">Bustyp selbst eintragen
-        <input id="${prefix}-art-frei" value="${isSonstige ? h(cur) : ""}" placeholder="z. B. Reisebus, Kleinbus"/>
+      <label>Typ (Bus-Bezeichnung)
+        <input id="${prefix}-typ" value="${h(currentTyp || "")}" placeholder="z. B. Integro, Mercedes-Benz C2 Solo"/>
       </label>`;
   }
-  // Wert des Bustyp-Feldes auslesen (Auswahl + ggf. Freitext)
+  // Bustyp aus der Auswahl lesen (nur Solo/Gelenk, sonst leer)
   function readBustyp(prefix) {
     const sel = document.getElementById(prefix + "-art");
     if (!sel) return "";
-    if (sel.value !== BUSTYP_SONSTIGE) return sel.value;
-    const frei = document.getElementById(prefix + "-art-frei");
-    return frei ? frei.value.trim() : "";
-  }
-  function toggleBustypFrei(prefix) {
-    const sel = document.getElementById(prefix + "-art");
-    const wrap = document.getElementById(prefix + "-art-frei-wrap");
-    if (!sel || !wrap) return;
-    wrap.style.display = sel.value === BUSTYP_SONSTIGE ? "" : "none";
+    return BUSTYP_OPTIONS.includes(sel.value) ? sel.value : "";
   }
 
   function toggleFzSort() {
@@ -253,16 +245,14 @@
     render();
   }
 
-  // Eine einzige Spalte "Typ": Bustyp (Solo/Gelenk/…) als Badge vor dem Bezeichner.
-  // Reihenfolge im Text ist bewusst "Bustyp zuerst", damit die Liste nach Bauart
-  // sortierbar bleibt (Solo, Gelenk, dann die Eigenbezeichnungen alphabetisch).
+  // Eine einzige Spalte "Typ": Bustyp (nur Solo/Gelenk) als Badge vor der
+  // Bus-Bezeichnung. Die Bezeichnung selbst ist Freitext (z. B. "Integro").
   const BUSTYP_RANG = { Solo: 0, Gelenk: 1 };
   function bustypCls(art) {
-    return art === "Solo" ? "sky" : art === "Gelenk" ? "violet" : "yellow";
+    return art === "Solo" ? "sky" : art === "Gelenk" ? "violet" : "gray";
   }
   function bustypSortKey(art) {
-    const a = art || "";
-    const r = BUSTYP_RANG[a];
+    const r = BUSTYP_RANG[art];
     return r != null ? String(r).padStart(2, "0") : "50";
   }
   function vehicleTypSortKey(f) {
@@ -1602,14 +1592,7 @@ function superProtokollView() {
           <div class="form-grid" style="margin-bottom:16px">
             <label>Wagennummer<input id="fz-wagennummer" placeholder="z. B. 123"/></label>
             <label>Kennzeichen<input id="fz-kennzeichen" placeholder="z. B. B-VB 1234"/></label>
-            ${bustypField("fz", "")}
-            <label>Typ<select id="fz-typ">
-              <option value="Bus">Bus</option>
-              <option value="Ersatzwagen">Ersatzwagen</option>
-              <option value="Fahrschule">Fahrschule</option>
-              <option value="Reserve">Reserve</option>
-              <option value="Sonderfahrzeug">Sonderfahrzeug</option>
-            </select></label>
+            ${bustypField("fz", "", "")}
             <label>Status<select id="fz-status">
               <option value="einsatzbereit">Einsatzbereit</option>
               <option value="nicht_einsatzbereit">Nicht einsatzbereit</option>
@@ -1728,14 +1711,12 @@ function superProtokollView() {
 
   function createFahrzeug() {
     const art = readBustyp("fz");
-    if (document.getElementById("fz-art").value === BUSTYP_SONSTIGE && !art) {
-      toast("Bustyp selbst eintragen (z. B. Reisebus)", "err"); return;
-    }
+    if (!art) { toast("Bustyp wählen (Solo oder Gelenk)", "err"); return; }
     const body = {
       wagennummer: document.getElementById("fz-wagennummer").value.trim(),
       kennzeichen: document.getElementById("fz-kennzeichen").value.trim(),
       art,
-      typ: document.getElementById("fz-typ").value,
+      typ: document.getElementById("fz-typ").value.trim(),
       status: document.getElementById("fz-status").value,
       ort: document.getElementById("fz-ort").value.trim(),
       bemerkung: document.getElementById("fz-bemerkung").value.trim(),
@@ -1759,14 +1740,7 @@ function superProtokollView() {
         <div class="form-grid">
           <label>Wagennummer<input id="${editId}-wagennummer" value="${h(f.wagennummer)}"/></label>
           <label>Kennzeichen<input id="${editId}-kennzeichen" value="${h(f.kennzeichen)}"/></label>
-          ${bustypField(editId, f.art || "")}
-          <label>Typ<select id="${editId}-typ">
-            <option value="Bus" ${f.typ === "Bus" ? "selected" : ""}>Bus</option>
-            <option value="Sonderfahrzeug" ${f.typ === "Sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
-            <option value="Ersatzwagen" ${f.typ === "Ersatzwagen" ? "selected" : ""}>Ersatzwagen</option>
-            <option value="Fahrschule" ${f.typ === "Fahrschule" ? "selected" : ""}>Fahrschule</option>
-            <option value="Reserve" ${f.typ === "Reserve" ? "selected" : ""}>Reserve</option>
-          </select></label>
+          ${bustypField(editId, f.art || "", f.typ || "")}
           <label>Status<select id="${editId}-status">
             <option value="einsatzbereit" ${f.status === "einsatzbereit" ? "selected" : ""}>Einsatzbereit</option>
             <option value="nicht_einsatzbereit" ${f.status === "nicht_einsatzbereit" ? "selected" : ""}>Nicht einsatzbereit</option>
@@ -1788,14 +1762,12 @@ function superProtokollView() {
 
   async function saveFahrzeug(id, editId) {
     const art = readBustyp(editId);
-    if (document.getElementById(editId + "-art").value === BUSTYP_SONSTIGE && !art) {
-      toast("Bustyp selbst eintragen (z. B. Reisebus)", "err"); return;
-    }
+    if (!art) { toast("Bustyp wählen (Solo oder Gelenk)", "err"); return; }
     const body = {
       wagennummer: document.getElementById(editId + "-wagennummer").value.trim(),
       kennzeichen: document.getElementById(editId + "-kennzeichen").value.trim(),
       art,
-      typ: document.getElementById(editId + "-typ").value,
+      typ: document.getElementById(editId + "-typ").value.trim(),
       status: document.getElementById(editId + "-status").value,
       ort: document.getElementById(editId + "-ort").value.trim(),
       bemerkung: document.getElementById(editId + "-bemerkung").value.trim(),
@@ -1895,6 +1867,11 @@ function superProtokollView() {
   // editable=false für alle anderen (lesende Übersicht "wer hat welchen Slot").
   function ksSlotTable(slots, apps, editable) {
     const appById = new Map((apps || []).map((a) => [a.id, a]));
+    // Auswahl nach Nutzername: "Name (User) HH:MM–HH:MM". Wer schon woanders
+    // sitzt, wird als "anderswo" markiert, damit man ihn nicht versehentlich
+    // doppelt einplant.
+    const woanders = new Map();
+    (apps || []).forEach((a) => { if (a.ksSlotId) woanders.set(a.id, a.ksSlotId); });
     const zellen = slots.map((s) => {
       const app = s.belegtVon ? appById.get(s.belegtVon) : null;
       if (!editable) {
@@ -1906,13 +1883,21 @@ function superProtokollView() {
           </tr>`;
       }
       const opt = `<option value="" ${!s.belegtVon ? "selected" : ""}>— frei —</option>` +
-        (apps || []).map((a) => `<option value="${a.id}" ${s.belegtVon === a.id ? "selected" : ""}>${h(a.username)}${a.von ? " (" + h(a.von) + "–" + h(a.bis) + ")" : ""}</option>`).join("");
+        (apps || []).map((a) => {
+          const sitztWoanders = woanders.get(a.id) && woanders.get(a.id) !== s.id;
+          const name = a.displayName && a.displayName !== a.username
+            ? `${a.displayName} (${a.username})` : (a.username || a.displayName || "?");
+          const zeit = a.von ? ` ${a.von}–${a.bis}` : "";
+          const marke = sitztWoanders ? " · ⚠ anderswo" : "";
+          return `<option value="${a.id}" ${s.belegtVon === a.id ? "selected" : ""}>${h(name)}${zeit}${marke}</option>`;
+        }).join("");
       return `
         <tr>
           <td><b>${h(s.von)}–${h(s.bis)}</b></td>
-          <td style="max-width:240px">
-            <select onchange="VBG.assignKsSlot('${s.id}', this.value)" style="width:100%">${opt}</select>
-            ${app && app.ksSlotId !== s.id ? `<span class="muted" style="font-size:11px">Warnung: anderswo eingeteilt</span>` : ""}
+          <td style="max-width:280px">
+            <select onchange="VBG.assignKsSlot('${s.id}', this.value)" style="width:100%"
+                    title="Nach Nutzername auswählen">${opt}</select>
+            ${app && app.ksSlotId && app.ksSlotId !== s.id ? `<span class="muted" style="font-size:11px">Warnung: anderswo eingeteilt</span>` : ""}
           </td>
           <td>
             ${s.belegtVon ? `<button class="btn btn-xs" onclick="VBG.ksZeitEintragen('${s.id}')">Zeit eintragen</button>` : `<span class="muted">–</span>`}
@@ -3411,10 +3396,23 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   }
 
   // ---- Supervisor: Anmeldungen ----
-  async function acceptApp(id) {
-    try { await api("POST", "/api/applications/" + id + "/accept"); toast("Angenommen", "ok"); await loadAppsAll(); render(); }
-    catch (e) { toast(e.message, "err"); }
-  }
+async function acceptApp(id) {
+  try {
+    const r = await api("POST", "/api/applications/" + id + "/accept");
+    if (r.ksAuto && r.ksAuto.zugeteilt && r.ksAuto.slots && r.ksAuto.slots.length) {
+      const s = r.ksAuto.slots;
+      toast(`Angenommen und automatisch eingeteilt: ${s[0].von}–${s[s.length - 1].bis} (${s.length} Slots)`, "ok");
+      await loadKsSlots();
+      await loadPlanKs(state.planShiftId);
+    } else if (r.ksAuto && r.ksAuto.grund) {
+      toast("Angenommen – bitte manuell zuteilen: " + r.ksAuto.grund, "warn");
+    } else {
+      toast("Angenommen", "ok");
+    }
+    await loadAppsAll();
+    render();
+  } catch (e) { toast(e.message, "err"); }
+}
   async function denyApp(id) {
     try { await api("POST", "/api/applications/" + id + "/deny"); toast("Abgelehnt", "ok"); await loadAppsAll(); render(); }
     catch (e) { toast(e.message, "err"); }
@@ -3699,7 +3697,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
-    toggleBustypFrei, toggleFzSort,
+    toggleFzSort,
     setKsSub, setKsStandort, setKsShift, assignKsSlot, ksZeitEintragen, ksApprove, ksReject,
     loadMaintenance, setMaintenance,
     loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug, backupNow,

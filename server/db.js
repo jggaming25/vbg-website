@@ -23,6 +23,18 @@ const DEFAULT_LINIEN = [
   { id: "linN1", name: "N1", beschreibung: "Nachtbus Gravenberg ZOB – Sorenkoppel (Gelenk)" },
 ];
 
+// Bustyp eines Fahrzeugs: es gibt genau zwei Werte, "Solo" und "Gelenk".
+// Alles andere (z. B. eine alte Frei-Bezeichnung aus dem früheren
+// "Sonstige"-Feld) wird zu "", damit die Linien-Prüfung nur diese zwei kennt.
+// Die Bus-Bezeichnung ("Integro", "Mercedes-Benz C2") steht in fahrzeuge.typ
+// und wird ausschliesslich von Hand eingetragen.
+const BUSTYPEN = ["Solo", "Gelenk"];
+function bustypOderLeer(raw) {
+  const v = String(raw == null ? "" : raw).trim();
+  const t = BUSTYPEN.find((b) => b.toLowerCase() === v.toLowerCase());
+  return t || "";
+}
+
 function emptyStore() {
   return {
     users: [],
@@ -148,6 +160,10 @@ function shapeAndMigrate(db) {
   if (!db.users) db.users = [];
   if (!db.linien) db.linien = [];
   if (!db.fahrzeuge) db.fahrzeuge = [];
+  // Bustyp ist auf "Solo"/"Gelenk" festgelegt: alte Frei-Bezeichnungen
+  // (z. B. aus dem früheren "Sonstige"-Feld) werden verworfen. Die
+  // Bus-Bezeichnung steckt in fahrzeuge.typ und bleibt unangetastet.
+  db.fahrzeuge.forEach((f) => { f.art = bustypOderLeer(f.art); });
   if (!db.shifts) db.shifts = [];
   if (!db.duties) db.duties = [];
   if (!db.wishes) db.wishes = [];
@@ -423,7 +439,7 @@ function importDutiesFromFile(filePath) {
       wagennummer: f.wagennummer,
       kennzeichen: f.kennzeichen || "",
       typ: f.typ || "",
-      art: f.art || "",
+      art: bustypOderLeer(f.art),
       status: f.status || "einsatzbereit",
       ort: f.ort || "",
       bemerkung: f.bemerkung || "",
