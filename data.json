@@ -294,6 +294,16 @@
       "bemerkung": "LE"
     },
     {
+      "id": "8ae9c4ed-2dad-4d1b-b236-4446cfd0071f",
+      "wagennummer": "1102",
+      "kennzeichen": "GV-VB 1102",
+      "typ": "Bus",
+      "art": "MAN A37",
+      "status": "einsatzbereit",
+      "ort": "Stümp Voiskamp",
+      "bemerkung": ""
+    },
+    {
       "id": "48644ee5-4b0e-497d-b293-16720f9c1a95",
       "wagennummer": "2504",
       "kennzeichen": "GV-VB 2504",
@@ -422,16 +432,6 @@
       "status": "einsatzbereit",
       "ort": "Betriebshof",
       "bemerkung": "Einsatzleitung / Dispo"
-    },
-    {
-      "id": "8ae9c4ed-2dad-4d1b-b236-4446cfd0071f",
-      "wagennummer": "1102",
-      "kennzeichen": "GV-VB 1102",
-      "typ": "Bus",
-      "art": "MAN A37",
-      "status": "einsatzbereit",
-      "ort": "Stümp Voiskamp",
-      "bemerkung": ""
     }
   ],
   "shifts": [
@@ -64087,6 +64087,14 @@
       "action": "Fahrzeug angelegt",
       "detail": "1102",
       "createdAt": "2026-09-26T12:38:10.807Z"
+    },
+    {
+      "id": "9c953661-7c0c-4093-bc37-3c355cbf64bb",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 1102 – 2504 – 2505 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T12:38:16.229Z"
     }
   ],
   "_vapid": {
