@@ -63393,7 +63393,8 @@
       "read": true,
       "createdAt": "2026-09-26T10:56:31.831Z",
       "readSeenBy": {
-        "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930": true
+        "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930": true,
+        "5acde28e-7789-493d-835b-6ce681929c59": true
       }
     },
     {
@@ -63433,7 +63434,7 @@
       "userId": "5acde28e-7789-493d-835b-6ce681929c59",
       "message": "Schwarzfahrer001 meldet sich für \"Busfahren\" an.",
       "type": "apply",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:57:56.990Z"
     },
     {
@@ -63441,7 +63442,7 @@
       "userId": "all-supervisors",
       "message": "Schwarzfahrer001 meldet sich für \"Busfahren\" an.",
       "type": "apply",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:57:56.990Z"
     }
   ],
