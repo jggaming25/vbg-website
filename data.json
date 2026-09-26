@@ -63408,7 +63408,7 @@
       "art": "bus",
       "standortId": null,
       "hinweis": "Ich will 2503 und Linie19",
-      "status": "pending",
+      "status": "accepted",
       "createdAt": "2026-09-26T13:23:27.481Z"
     }
   ],
@@ -63574,6 +63574,14 @@
       "type": "apply",
       "read": false,
       "createdAt": "2026-09-26T13:23:27.636Z"
+    },
+    {
+      "id": "dd51406c-3ab2-442b-bda2-cd131d683f88",
+      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "message": "Deine Anmeldung wurde angenommen.",
+      "type": "success",
+      "read": false,
+      "createdAt": "2026-09-26T13:42:16.045Z"
     }
   ],
   "announcements": [
@@ -64173,6 +64181,14 @@
       "action": "Anmeldung gelöscht",
       "detail": "Lkw448 · kundenservice",
       "createdAt": "2026-09-26T13:23:02.601Z"
+    },
+    {
+      "id": "78e085cf-6f4f-4dce-9ce5-acb3b2c59b19",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Anmeldung angenommen",
+      "detail": "Lkw448 · bus · 18:00–21:00",
+      "createdAt": "2026-09-26T13:42:15.895Z"
     }
   ],
   "_vapid": {
