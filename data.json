@@ -63360,13 +63360,13 @@
   "pushSubscriptions": [
     {
       "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
-      "endpoint": "https://wns2-am3p.notify.windows.com/w/?token=BQYAAACrBLzk%2bFvhYdCtBf6cq1emgF1Nh0RxYjbFWJNksvw%2fJRnSnKZnJrgW2hXKFCz0wq3WtUlRtRCVxqEudOPhx7fUKnMEV9AQd1rrFcQ1r58gCQW4i0MGQ5gVHuUYlNuGoImjlKhDSQlNXh5tCmstZUoFm%2fbsPF%2bkHRIHGuib73WUgyoDgrZlI96KJakmVJ52JrEUhvUFdx7G%2bDHQR5BukpGgntYfkPQjbzwvsCrIkEKWAEAJeET%2fL78POPZX7ZlSkkrREaeuKUahLdEs479oQoWKrIlJlmoFjlHuIGOLidbHBbYzxSm0ZCR0K7odky1i1wfgfYrHcrvEyUkJlI2bycHs",
+      "endpoint": "https://wns2-am3p.notify.windows.com/w/?token=BQYAAABy5FagQrQ%2ffCVneO5ehhydWLruD42CvWGyQdVv1vjPV8KpJP6Ca9EobJH2kVhLSOBNOLTvHLeDKwsXgqTK1FOZZniTxYsAf1nJWfP703XeN0T%2bQCp6Vf9qrU3Ear8seWcX9t2BqTaYmyurKjl0TTkIiPTSnUYnMTeifDtOcBny0Iu9u8yfoTlAo34LGjFVFI9qLQo8MHngga6vOXfbaDzlzngxb2tn1IpT740J4Uy26nXLgEuxrXiL9HnuLjqoKiDdvreo2G6Dni5Vo2HMvV0czJKdErS9SH4r2HUsp2VVN6qWu8eC7zENeIUR5usgUYCvx%2bhWHJCZSOXrNDf4Cy8S",
       "keys": {
-        "auth": "TfloT2LIF0qzErs56esywQ==",
-        "p256dh": "BLvh8MVC7dVC9D1G8iaIEdj5H5MwddfcqMytialzNliuLTzJQfIghLpiMKQDkEFWrqIvBF5Kx9N6LzQPI+TcPvs="
+        "auth": "TAgZ/q1XVURsgTVAZB2QAw==",
+        "p256dh": "BI8sGL9Ai68TWB2fanM2G3UmRdWv9cJyWtALuk6X3187UHkIplNhaeUX8m+RPI19rman1GY1Mv0bpwSgNFb6TPI="
       },
       "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
-      "createdAt": "2026-09-26T09:57:01.576Z"
+      "createdAt": "2026-09-26T10:26:15.697Z"
     }
   ],
   "fahrtenbuch": [],
