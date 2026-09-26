@@ -387,6 +387,7 @@
       <main>${renderView()}</main>`;
     renderTopbarBadge();
     initFahrzeugDnd();
+    initCarousel();
   }
 
   function renderForcePasswordChange() {
@@ -566,7 +567,7 @@
       <div class="container carousel-container" style="margin-top:18px;overflow:visible;border-radius:12px;background:var(--panel2);border:1px solid var(--border)">
         <div class="carousel-viewport" style="overflow:hidden;width:100%;border-radius:12px;">
           <div class="carousel-track" id="carousel-track" style="display:flex;transition:transform 0.5s ease;width:${carouselImages.length * 100}%;">
-            ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;padding:0 8px;box-sizing:border-box;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;border-radius:8px;" loading="lazy"/></div>`).join("")}
+            ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;padding:0 8px;box-sizing:border-box;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:contain;display:block;border-radius:8px;background:var(--panel);"/></div>`).join("")}
           </div>
         </div>
         <div class="carousel-controls" style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
@@ -3135,7 +3136,6 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       document.documentElement.lang = (state.user.language === "en") ? "en" : "de";
       await bootstrapAfterLogin();
       render();
-      initCarousel();
       tryEnablePush();
     } catch (e) {
       Auth.clear();
@@ -3143,31 +3143,61 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     }
   }
 
+  // ---------- Carousel ----------
+  // Das Carousel lebt im Dashboard, das bei jedem render() komplett neu aufgebaut wird
+  // (z. B. durch den Benachrichtigungs-Poll alle 10 s). Deshalb wird der Timer genau
+  // einmal gestartet und sucht bei jedem Tick die aktuellen DOM-Elemente – sonst zeigt
+  // er ins Leere und die Bilder wechseln nicht mehr.
+  const CAROUSEL_MS = 6000; // 6 Sekunden pro Bild
   let carouselTimer = null;
   let carouselIndex = 0;
-  function initCarousel() {
-    const track = document.getElementById("carousel-track");
-    const dots = document.querySelectorAll(".carousel-dot");
-    if (!track || !dots.length) { return; }
-    if (carouselTimer) clearInterval(carouselTimer);
-    carouselTimer = setInterval(() => {
-      carouselIndex = (carouselIndex + 1) % dots.length;
-      updateCarousel(track, dots, carouselIndex);
-    }, 5000);
-    dots.forEach((dot, i) => {
-      dot.onclick = () => {
-        carouselIndex = i;
-        updateCarousel(track, dots, carouselIndex);
-      };
-    });
-    // Initial render to center first slide
-    updateCarousel(track, dots, carouselIndex);
+
+  function carouselNodes() {
+    return {
+      track: document.getElementById("carousel-track"),
+      dots: Array.from(document.querySelectorAll(".carousel-dot")),
+    };
   }
+
   function updateCarousel(track, dots, index) {
-    if (!track) return;
+    if (!track || !dots.length) return;
     const slideWidth = 100 / dots.length;
     track.style.transform = `translateX(-${index * slideWidth}%)`;
     dots.forEach((d, i) => d.style.background = i === index ? "var(--accent)" : "var(--muted)");
+  }
+
+  // Timer läuft unabhängig von render() weiter – nur einmalig anlegen.
+  function ensureCarouselTimer() {
+    if (carouselTimer) return;
+    carouselTimer = setInterval(() => {
+      const { track, dots } = carouselNodes();
+      if (!track || !dots.length) return; // Dashboard nicht sichtbar
+      carouselIndex = (carouselIndex + 1) % dots.length;
+      updateCarousel(track, dots, carouselIndex);
+    }, CAROUSEL_MS);
+  }
+
+  function restartCarouselTimer() {
+    if (carouselTimer) clearInterval(carouselTimer);
+    carouselTimer = null;
+    ensureCarouselTimer();
+  }
+
+  // Nach jedem render() neu an die frischen Elemente binden (ohne Timer zu resetten).
+  function initCarousel() {
+    const { track, dots } = carouselNodes();
+    if (!track || !dots.length) return;
+    if (carouselIndex >= dots.length) carouselIndex = 0;
+    dots.forEach((dot, i) => {
+      dot.onclick = () => {
+        carouselIndex = i;
+        const n = carouselNodes();
+        updateCarousel(n.track, n.dots, i);
+        restartCarouselTimer(); // manueller Klick startet die 6 s neu
+      };
+    });
+    updateCarousel(track, dots, carouselIndex);
+    ensureCarouselTimer();
   }
 
   window.VBG = {
