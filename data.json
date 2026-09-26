@@ -63532,7 +63532,7 @@
       "userId": "all-supervisors",
       "message": "Lkw448 meldet sich für \"Kundenservice\" an.",
       "type": "apply",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T12:16:26.736Z"
     },
     {
