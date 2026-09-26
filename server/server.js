@@ -787,6 +787,7 @@ app.delete("/api/users/:id", requireAuth, requireSupervisor, (req, res) => {
   const i = data.users.findIndex((u) => u.id === req.params.id);
   if (i === -1) return res.status(404).json({ error: "Nutzer nicht gefunden" });
   if (data.users[i].protected) return res.status(403).json({ error: "Geschützter Nutzer" });
+  if (data.users[i].role === "supervisor") return res.status(403).json({ error: "Supervisor-Accounts können nicht gelöscht werden" });
   if (data.users[i].id === req.user.id) return res.status(400).json({ error: "Eigenes Konto nicht löschen" });
   const [removed] = data.users.splice(i, 1);
   data.wishes = data.wishes.filter((w) => w.userId !== removed.id);

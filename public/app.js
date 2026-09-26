@@ -1589,7 +1589,7 @@ function superProtokollView() {
         <td>
           <button class="btn btn-ghost btn-xs" onclick="VBG.editUser('${u.id}')">Bearbeiten</button>
           <button class="btn btn-ghost btn-xs" onclick="VBG.resetPw('${u.id}')">Passwort</button>
-          ${u.protected ? "" : `
+          ${u.protected || u.role === "supervisor" ? "" : `
           <button class="btn btn-xs ${u.suspended ? "btn-green" : "btn-yellow"}" onclick="VBG.toggleSuspend('${u.id}')">${u.suspended ? "Entsperren" : "Sperren"}</button>
           <button class="btn btn-danger btn-xs" onclick="VBG.deleteUser('${u.id}')">Löschen</button>`}
         </td>
