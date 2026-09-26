@@ -30,7 +30,7 @@
     {
       "id": "5acde28e-7789-493d-835b-6ce681929c59",
       "username": "Schwarzfahrer001",
-      "passwordHash": "$2a$10$izJVyxo37ktTyTLrYxjYo.8YT2WyRUFXz5xxXcVkQL0sJBVlx18BS",
+      "passwordHash": "$2a$10$9MhbETeXbnd81V/NIxI4OeV9uSDJOUPItYduhbK3elG1pxgeHWiES",
       "role": "supervisor",
       "linien": [
         "lin19",
@@ -50,8 +50,9 @@
       "language": "de",
       "avatar": "",
       "suspended": false,
-      "mustChangePassword": true,
-      "createdAt": "2026-09-26T10:54:45.099Z"
+      "mustChangePassword": false,
+      "createdAt": "2026-09-26T10:54:45.099Z",
+      "passwordChangedAt": "2026-09-26T10:55:37.194Z"
     }
   ],
   "linien": [
@@ -63492,6 +63493,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "Dispo",
       "createdAt": "2026-09-26T10:47:46.592Z"
+    },
+    {
+      "id": "c43054a7-4e24-4e33-a2da-d4d87840b89b",
+      "actorId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "actorName": "Schwarzfahrer001",
+      "action": "Passwort geändert",
+      "detail": "Schwarzfahrer001",
+      "createdAt": "2026-09-26T10:55:37.194Z"
     }
   ],
   "_vapid": {
