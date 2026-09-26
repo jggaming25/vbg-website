@@ -63732,6 +63732,14 @@
       "action": "Fahrzeug angelegt",
       "detail": "2503",
       "createdAt": "2026-09-26T11:39:19.505Z"
+    },
+    {
+      "id": "1c5c1368-df8d-41dc-a8bc-43a355a575fc",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "2503",
+      "createdAt": "2026-09-26T11:39:39.494Z"
     }
   ],
   "_vapid": {
