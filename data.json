@@ -284,6 +284,16 @@
       "bemerkung": ""
     },
     {
+      "id": "48644ee5-4b0e-497d-b293-16720f9c1a95",
+      "wagennummer": "2504",
+      "kennzeichen": "GV-VB 2504",
+      "typ": "Bus",
+      "art": "",
+      "status": "einsatzbereit",
+      "ort": "Gravenberg",
+      "bemerkung": "LE"
+    },
+    {
       "id": "ad6a7121-7896-4467-ae66-bcb9d83afee9",
       "wagennummer": "2503",
       "kennzeichen": "GV-VB 2503",
@@ -402,16 +412,6 @@
       "status": "einsatzbereit",
       "ort": "Betriebshof",
       "bemerkung": "Einsatzleitung / Dispo"
-    },
-    {
-      "id": "48644ee5-4b0e-497d-b293-16720f9c1a95",
-      "wagennummer": "2504",
-      "kennzeichen": "GV-VB 2504",
-      "typ": "Bus",
-      "art": "",
-      "status": "einsatzbereit",
-      "ort": "Gravenberg",
-      "bemerkung": "LE"
     }
   ],
   "shifts": [
@@ -63854,6 +63854,22 @@
       "action": "Fahrzeug angelegt",
       "detail": "2504",
       "createdAt": "2026-09-26T11:50:54.830Z"
+    },
+    {
+      "id": "01262506-bd71-4e09-808c-7e3ef2195a44",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2504 – 2503 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T11:51:00.174Z"
+    },
+    {
+      "id": "b645abad-5238-4619-91dc-4813dbd334b6",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2504 – 2503 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T11:51:03.363Z"
     }
   ],
   "_vapid": {
