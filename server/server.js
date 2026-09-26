@@ -98,6 +98,7 @@ function publicUser(u) {
     roleLabel: roleLabel(u.role),
     linien: u.linien || [],
     strafstunden: u.strafstunden || 0,
+    strafstundenGrund: u.strafstundenGrund || "",
     kündigung: (u.strafstunden || 0) >= 20,
     discordName: u.discordName || "",
     robloxName: u.robloxName || "",
@@ -450,6 +451,11 @@ function enrichDuty(d) {
   const line = data.linien.find((l) => l.id === d.linieId) || null;
   const v = vehicleById(effectiveVehicle(d));
   const dauer = dutyDauerMin(d);
+  let kundenserviceStandort = null;
+  if (d.art === "kundenservice" && d.kundenserviceStandortId) {
+    const ks = data.kundenservice.find((k) => k.id === d.kundenserviceStandortId);
+    if (ks) kundenserviceStandort = { id: ks.id, name: ks.name, startTime: ks.startTime, endTime: ks.endTime };
+  }
   return {
     ...d,
     trips: sortTrips({ ...d }).trips.map((t) => {
@@ -466,6 +472,7 @@ function enrichDuty(d) {
     spanneMin: dauer.spanne,
     pausenMin: dauer.pausen,
     linienwechsel: d.linienwechsel || null,
+    kundenserviceStandort,
   };
 }
 
@@ -650,7 +657,7 @@ app.post("/api/users", async (req, res) => {
     passwordHash: await bcrypt.hash(pw, 10),
     role: validRole,
     linien: Array.isArray(linien) ? linien : [],
-    license: license || "",
+    license: validRole === "supervisor" ? "Solo,Gelenk" : (license || ""),
     strafstunden: 0,
     discordName: "",
     robloxName: "",
@@ -734,7 +741,11 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
   const { role, linien, license, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset, strafFrist, strafFristDelta } = req.body || {};
   if (role && (role === "supervisor" || DRIVER_ROLES.includes(role))) user.role = role;
   if (Array.isArray(linien)) user.linien = linien;
-  if (typeof license === "string") user.license = license;
+  if (user.role === "supervisor") {
+    user.license = "Solo,Gelenk";
+  } else if (typeof license === "string") {
+    user.license = license;
+  }
   if (typeof suspended === "boolean") user.suspended = suspended;
   if (typeof discordName === "string") user.discordName = discordName.trim();
   if (typeof language === "string") user.language = language.trim() || "de";
@@ -1382,17 +1393,20 @@ app.post("/api/shifts/:id/duties", requireAuth, requireSupervisor, (req, res) =>
   const data = db.load();
   const shift = data.shifts.find((s) => s.id === req.params.id);
   if (!shift) return res.status(404).json({ error: "Shift nicht gefunden" });
-  const { name, linieId, kurs, notes, unit, startTime, endTime, linienwechsel } = req.body || {};
+  const { name, linieId, kurs, notes, unit, startTime, endTime, linienwechsel, art, kundenserviceStandortId } = req.body || {};
   if (!name) return res.status(400).json({ error: "Name fehlt" });
+  const dutyArt = art || "bus";
   const duty = {
     id: uid(), shiftId: shift.id,
-    linieId: linieId || null, kurs: kurs || "",
+    art: dutyArt,
+    linieId: dutyArt === "bus" ? (linieId || null) : null, kurs: kurs || "",
     name: name.trim(), vehicleId: null, unit: unit || "",
     startTime: startTime || "", endTime: endTime || "",
     notes: notes || "", bemerkung: "",
     linienwechsel: linienwechsel || "",
     cancelled: false, cancelNote: "",
     assignedUserId: null, trips: [], createdAt: new Date().toISOString(),
+    kundenserviceStandortId: dutyArt === "kundenservice" ? (kundenserviceStandortId || null) : null,
   };
   data.duties.push(duty);
   audit(data, req.user, "Duty angelegt", duty.name);
@@ -1420,6 +1434,8 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   if (typeof startTime === "string") duty.startTime = startTime;
   if (typeof endTime === "string") duty.endTime = endTime;
   if (typeof linienwechsel === "string") duty.linienwechsel = linienwechsel;
+  if (typeof art !== "undefined") duty.art = art;
+  if (typeof kundenserviceStandortId !== "undefined") duty.kundenserviceStandortId = art === "kundenservice" ? kundenserviceStandortId : null;
 
   // Zeiten anpassen → Fahrtenzeiten NICHT automatisch verschieben (nur §bezeichnung)
   if (typeof vehicleId !== "undefined") {

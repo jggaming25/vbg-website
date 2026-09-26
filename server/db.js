@@ -186,6 +186,7 @@ function shapeAndMigrate(db) {
     if (typeof u.avatar !== "string") u.avatar = "";
     if (u.mustChangePassword === undefined) u.mustChangePassword = false;
     if (typeof u.license !== "string") u.license = "";
+    if (u.role === "supervisor" && u.license !== "Solo,Gelenk") u.license = "Solo,Gelenk";
     delete u.fdl;
     delete u.tf;
     delete u.warns;
