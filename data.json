@@ -308,10 +308,10 @@
       "wagennummer": "2505",
       "kennzeichen": "GV-VB 2505",
       "typ": "Bus",
-      "art": "",
+      "art": "Citaro C2 LE",
       "status": "einsatzbereit",
       "ort": "Gravenberg",
-      "bemerkung": "LE"
+      "bemerkung": ""
     },
     {
       "id": "09999c28-d96a-4229-9447-9ec1a9153d3c",
@@ -64125,6 +64125,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2504",
       "createdAt": "2026-09-26T12:39:12.261Z"
+    },
+    {
+      "id": "7a7d0d6c-9be9-49dc-adfa-f3a17ba80a92",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "2505",
+      "createdAt": "2026-09-26T12:39:20.249Z"
     }
   ],
   "_vapid": {
