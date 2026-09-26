@@ -63632,5 +63632,11 @@
   "_vapid": {
     "publicKey": "BJPo1N8IuQQuxhDs8chZQDpmRrJ6zD3pTVmxKcBuSdFARNnpy0Q2qn_EyFlFRk9M7brKy3X5015SYbQaAMMB7iM",
     "privateKey": "NBV-ttvm_V_2mia_woZVf0DdGEHcA9QWUqeGeEgj6NA"
+  },
+  "maintenance": {
+    "enabled": false,
+    "reason": "",
+    "setBy": null,
+    "setAt": null
   }
 }
