@@ -63740,6 +63740,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2503",
       "createdAt": "2026-09-26T11:39:39.494Z"
+    },
+    {
+      "id": "cc3c1d75-ae58-4063-b458-ebf2537ea92d",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 1101 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1404 – 1405 – 2201 – 2202 – 2501 – 2502 – 2004 – 2005 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2 – 2503",
+      "createdAt": "2026-09-26T11:49:11.515Z"
     }
   ],
   "_vapid": {
