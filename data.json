@@ -118,7 +118,7 @@
       "wagennummer": "2088",
       "kennzeichen": "-",
       "typ": "Bus",
-      "art": "Integro 560",
+      "art": "",
       "status": "sonderfahrzeug",
       "ort": "Betriebshof NeuenburgNeuenburg",
       "bemerkung": "Sonderfahrzeug (derzeit nicht einsatzbereit)"
@@ -128,7 +128,7 @@
       "wagennummer": "2003",
       "kennzeichen": "GV-VB 2003",
       "typ": "Bus",
-      "art": "Citaro C1 Ü",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": ""
@@ -138,7 +138,7 @@
       "wagennummer": "2004",
       "kennzeichen": "GV-VB 2004",
       "typ": "Bus",
-      "art": "MAN NG313",
+      "art": "",
       "status": "nicht_einsatzbereit",
       "ort": "Betriebshof Neuenburg",
       "bemerkung": "Derzeitiger Display-Defekt"
@@ -148,7 +148,7 @@
       "wagennummer": "2005",
       "kennzeichen": "GV-VB 2005",
       "typ": "Bus",
-      "art": "MAN NG313",
+      "art": "",
       "status": "nicht_einsatzbereit",
       "ort": "Betriebshof Neuenburg",
       "bemerkung": "Derzeitiger Display-Defekt"
@@ -158,7 +158,7 @@
       "wagennummer": "1101",
       "kennzeichen": "GV-VB 1101",
       "typ": "Bus",
-      "art": "MAN A37",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": "Reserve Bus"
@@ -168,7 +168,7 @@
       "wagennummer": "1102",
       "kennzeichen": "GV-VB 1102",
       "typ": "Bus",
-      "art": "MAN A37",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Stümp Voiskamp",
       "bemerkung": ""
@@ -288,7 +288,7 @@
       "wagennummer": "2503",
       "kennzeichen": "GV-VB 2503",
       "typ": "Bus",
-      "art": "Citaro C2 LE",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": ""
@@ -298,7 +298,7 @@
       "wagennummer": "2504",
       "kennzeichen": "GV-VB 2504",
       "typ": "Bus",
-      "art": "Citaro C2 LE",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": ""
@@ -308,7 +308,7 @@
       "wagennummer": "2505",
       "kennzeichen": "GV-VB 2505",
       "typ": "Bus",
-      "art": "Citaro C2 LE",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": ""
@@ -408,7 +408,7 @@
       "wagennummer": "Tiguan_1",
       "kennzeichen": "TIG-001",
       "typ": "Bus",
-      "art": "SUV",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "-",
       "bemerkung": "Einsatzleitung / Dispo"
@@ -418,7 +418,7 @@
       "wagennummer": "Tiguan_2",
       "kennzeichen": "TIG-002",
       "typ": "Bus",
-      "art": "SUV",
+      "art": "",
       "status": "einsatzbereit",
       "ort": "-",
       "bemerkung": "Einsatzleitung / Dispo"
