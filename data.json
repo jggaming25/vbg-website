@@ -63402,7 +63402,7 @@
       "dringend": true,
       "von": "jggaming2518",
       "rang": "Supervisor",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:56:31.831Z"
     },
     {
@@ -63414,7 +63414,7 @@
       "dringend": true,
       "von": "jggaming2518",
       "rang": "Supervisor",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:56:31.831Z"
     }
   ],
