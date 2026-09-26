@@ -527,9 +527,11 @@
       </div>
 
       <!-- Image Carousel -->
-      <div class="container carousel-container" style="margin-top:18px;overflow:hidden;border-radius:12px;background:var(--panel2);border:1px solid var(--border)">
-        <div class="carousel-track" id="carousel-track" style="display:flex;transition:transform 0.5s ease;width:${carouselImages.length * 100}%;">
-          ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;" loading="lazy"/></div>`).join("")}
+      <div class="container carousel-container" style="margin-top:18px;overflow:visible;border-radius:12px;background:var(--panel2);border:1px solid var(--border)">
+        <div class="carousel-viewport" style="overflow:hidden;width:100%;border-radius:12px;">
+          <div class="carousel-track" id="carousel-track" style="display:flex;transition:transform 0.5s ease;width:${carouselImages.length * 100}%;">
+            ${carouselImages.map((img, i) => `<div class="carousel-slide" style="flex:0 0 ${100/carouselImages.length}%;min-width:0;padding:0 8px;box-sizing:border-box;"><img src="${img}" alt="Vorschau ${i+1}" style="width:100%;height:auto;max-height:300px;object-fit:cover;display:block;border-radius:8px;" loading="lazy"/></div>`).join("")}
+          </div>
         </div>
         <div class="carousel-controls" style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
           ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="flex:0 0 auto;width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
@@ -560,16 +562,38 @@
       </div>`;
   }
 
-  function superProtokollView() {
+function superProtokollView() {
     const items = state.superLog || [];
-    const rows = items.length ? items.map((x) => `
+    // Filter
+    const filterUser = state.logFilterUser || "";
+    const filterAction = state.logFilterAction || "";
+    const filterFrom = state.logFilterFrom || "";
+    const filterTo = state.logFilterTo || "";
+    const filtered = items.filter((x) => {
+      if (filterUser && !(x.actorName || "").toLowerCase().includes(filterUser.toLowerCase())) return false;
+      if (filterAction && !(x.action || "").toLowerCase().includes(filterAction.toLowerCase())) return false;
+      if (filterFrom) {
+        const d = new Date(x.createdAt);
+        if (d < new Date(filterFrom)) return false;
+      }
+      if (filterTo) {
+        const d = new Date(x.createdAt);
+        const toEnd = new Date(filterTo);
+        toEnd.setHours(23, 59, 59, 999);
+        if (d > toEnd) return false;
+      }
+      return true;
+    });
+    const actions = [...new Set(items.map((x) => x.action).filter(Boolean))].sort();
+    const users = [...new Set(items.map((x) => x.actorName).filter(Boolean))].sort();
+    const rows = filtered.length ? filtered.map((x) => `
       <tr>
         <td class="muted" style="white-space:nowrap">${h(fmtTimestamp(x))}</td>
         <td>${h(x.actorName || x.actor || "?")}</td>
         <td><b>${h(x.action || "")}</b></td>
         <td>${h(x.detail || "")}</td>
       </tr>`).join("")
-      : `<tr><td colspan="4" class="muted">Noch keine Einträge.</td></tr>`;
+      : `<tr><td colspan="4" class="muted">Keine Einträge (oder Filter zu restriktiv).</td></tr>`;
     return `
       <div class="spread">
         <span class="muted">Nur die letzten 2000 Aktionen werden gespeichert</span>
@@ -577,12 +601,23 @@
           <button class="btn btn-ghost" onclick="VBG.loadSuperLog().then(()=>render())">Aktualisieren</button>
         </div>
       </div>
+      <div class="container" style="margin-bottom:12px">
+        <div class="form-grid" style="gap:8px">
+          <label>Nutzer filtern<input id="log-filter-user" value="${h(state.logFilterUser || "")}" placeholder="Nutzername" oninput="VBG.setLogFilterUser(this.value)"/></label>
+          <label>Aktion filtern<select id="log-filter-action" onchange="VBG.setLogFilterAction(this.value)">
+            <option value="">— alle Aktionen —</option>
+            ${[...new Set((state.superLog || []).map((x) => x.action).filter(Boolean))].sort().map((a) => `<option value="${h(a)}" ${state.logFilterAction === a ? "selected" : ""}>${h(a)}</option>`).join("")}
+          </select></label>
+          <label>Von<input id="log-filter-from" type="date" value="${h(state.logFilterFrom || "")}" onchange="VBG.setLogFilterFrom(this.value)"/></label>
+          <label>Bis<input id="log-filter-to" type="date" value="${h(state.logFilterTo || "")}" onchange="VBG.setLogFilterTo(this.value)"/></label>
+          <button class="btn btn-ghost" style="align-self:end" onclick="VBG.resetLogFilter()">Filter zurücksetzen</button>
+        </div>
+      </div>
       <div class="container">
         <table>
           <thead><tr><th>Wann</th><th>Wer</th><th>Aktion</th><th>Details</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+        </table>`;
   }
 
   // ---------- Shifts ----------
@@ -716,6 +751,17 @@
         </div>
       </div>`;
 
+    // Shift-Zeitraum anzeigen
+    if (shift.startTime && shift.endTime) {
+      html += `
+        <div class="container" style="margin-top:8px;padding:8px;background:var(--panel);border-radius:8px;border:1px solid var(--border)">
+          <div class="spread">
+            <div><b>⏱ Shift-Zeitraum:</b> ${h(shift.startTime)} – ${h(shift.endTime)} (${Math.round(((toMin(shift.endTime) - toMin(shift.startTime) + 1440) % 1440) / 60 * 10) / 10} h)</div>
+            <div class="muted"><small>Alle Dutys werden automatisch auf dieses Zeitfenster geschnitten.</small></div>
+          </div>
+        </div>`;
+    }
+
     // ---- Kundenservice-Block ----
     html += `
       <div class="container">
@@ -735,6 +781,7 @@
                   <button class="btn btn-danger btn-xs" onclick="VBG.delStandort('${k.id}')">×</button>
                 </span>` : ""}
               </div>
+              ${k.startTime && k.endTime ? `<div class="muted" style="font-size:12px;margin-top:6px"><b>⏱ ${h(k.startTime)} – ${h(k.endTime)}</b></div>` : ""}
               <div class="muted" style="font-size:12px;margin-top:6px">Anmeldung im Tab „Anmeldung“ → Art <b>Kundenservice</b></div>
             </div>`).join("")}
           </div>`}
@@ -1530,7 +1577,7 @@
     const wishes = state.wishesAll || [];
     const shiftsReal = realShifts();
     return `
-      <h3>Anmeldungen</h3>
+      <h3>Anmeldungen & Wünsche</h3>
       <div class="container">
         <div class="form-grid" style="margin-bottom:10px">
           <label>Filter Nutzer<input id="af-user" value="${h(state.appFilter.nutzer)}" onchange="VBG.setAppFilterNutzer(this.value)"/></label>
@@ -1540,6 +1587,9 @@
           </select></label>
           <button class="btn btn-ghost" style="align-self:end" onclick="VBG.resetAppFilter()">Filter zurücksetzen</button>
         </div>
+        
+        <!-- Anmeldungen -->
+        <h4 style="margin:16px 0 8px">Anmeldungen</h4>
         ${apps.length ? `
         <table>
           <thead><tr><th>Nutzer</th><th>Shift</th><th>Von–Bis</th><th>Hinweis</th><th>Status</th><th></th></tr></thead>
@@ -1562,11 +1612,10 @@
               </tr>`).join("")}
           </tbody>
         </table>` : `<div class="empty">Keine Anmeldungen ${apps === undefined ? "(Filter?)" : ""}.</div>`}
-      </div>
 
-      <h3>Wünsche</h3>
-      <div class="container">
-        <p class="muted">Wünsche von Fahrern für bestimmte Dutys – sie können hier angenommen (zugeteilt) oder abgelehnt werden.</p>
+        <!-- Wünsche -->
+        <h4 style="margin:16px 0 8px">Wünsche (Duty-Wünsche)</h4>
+        <p class="muted" style="margin-bottom:8px">Wünsche von Fahrern für bestimmte Dutys – sie können hier angenommen (zugeteilt) oder abgelehnt werden.</p>
         ${wishes.length ? `
         <table>
           <thead><tr><th>Nutzer</th><th>Duty</th><th>Linie</th><th>Zeit</th><th>Aktion</th></tr></thead>
@@ -1616,30 +1665,52 @@
   async function pushSubscribe() {
     if (!pushSupported()) return false;
     if (Notification.permission !== "granted") {
-      const p = await Notification.requestPermission();
-      if (p !== "granted") return false;
+      try {
+        const p = await Notification.requestPermission();
+        if (p !== "granted") {
+          toast("Benachrichtigungsberechtigung verweigert. Bitte in Browser-Einstellungen erlauben.", "err");
+          return false;
+        }
+      } catch (e) {
+        toast("Fehler beim Anfordern der Berechtigung: " + e.message, "err");
+        return false;
+      }
     }
     // Korrekter Scope für GitHub Pages (Subpath /vbg-website/)
     const base = window.VBG_API_BASE || "";
     const swScope = base ? base.replace(/\/api$/, "/") : "./";
-    const reg = await navigator.serviceWorker.register("sw.js", { scope: swScope });
-    await navigator.serviceWorker.ready;
-    const pub = await getVapidPublicKey();
-    if (!pub) return false;
-    const pm = reg.pushManager;
-    let sub = await pm.getSubscription();
-    if (!sub) {
-      sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pub) });
+    try {
+      const reg = await navigator.serviceWorker.register("sw.js", { scope: swScope });
+      await navigator.serviceWorker.ready;
+    } catch (e) {
+      toast("Service Worker Registrierung fehlgeschlagen: " + e.message, "err");
+      return false;
     }
-    if (!sub) return false;
-    await api("POST", "/api/push/register", {
-      endpoint: sub.endpoint,
-      auth: arrayBufToB64(sub.getKey("auth")),
-      p256dh: arrayBufToB64(sub.getKey("p256dh")),
-      ua: navigator.userAgent,
-    });
-    pushActive = true;
-    return true;
+    const pub = await getVapidPublicKey();
+    if (!pub) {
+      toast("VAPID-Key nicht verfügbar", "err");
+      return false;
+    }
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const pm = reg.pushManager;
+      let sub = await pm.getSubscription();
+      if (!sub) {
+        sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pub) });
+      }
+      if (!sub) return false;
+      await api("POST", "/api/push/register", {
+        endpoint: sub.endpoint,
+        auth: arrayBufToB64(sub.getKey("auth")),
+        p256dh: arrayBufToB64(sub.getKey("p256dh")),
+        ua: navigator.userAgent,
+      });
+      pushActive = true;
+      return true;
+    } catch (e) {
+      toast("Push-Subscription fehlgeschlagen: " + e.message, "err");
+      return false;
+    }
   }
   async function pushUnsubscribe() {
     pushActive = false;
@@ -2803,6 +2874,11 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   function setAppFilterNutzer(v) { state.appFilter.nutzer = v; state.appsAll = null; render(); }
   function setAppFilterShift(v) { state.appFilter.shift = v; state.appsAll = null; render(); }
   function resetAppFilter() { state.appFilter = { nutzer: "", shift: "" }; state.appsAll = null; render(); }
+  function setLogFilterUser(v) { state.logFilterUser = v; render(); }
+  function setLogFilterAction(v) { state.logFilterAction = v; render(); }
+  function setLogFilterFrom(v) { state.logFilterFrom = v; render(); }
+  function setLogFilterTo(v) { state.logFilterTo = v; render(); }
+  function resetLogFilter() { state.logFilterUser = ""; state.logFilterAction = ""; state.logFilterFrom = ""; state.logFilterTo = ""; render(); }
 
   // ---- Outro ----
   function doLogout() {
@@ -2872,6 +2948,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
         updateCarousel(track, dots, carouselIndex);
       };
     });
+    // Initial render to center first slide
+    updateCarousel(track, dots, carouselIndex);
   }
   function updateCarousel(track, dots, index) {
     if (!track) return;
@@ -2884,6 +2962,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     setView, setSuperTab, doLogin, doLogout, doFirstPasswordChange, doChangePassword,
     setAnmeldungShift, setAnmeldungArt, setAnmeldungStandort, setActivityRange,
     setAppFilterNutzer, setAppFilterShift, resetAppFilter,
+    setLogFilterUser, setLogFilterAction, setLogFilterFrom, setLogFilterTo, resetLogFilter,
     toggleNotif, readNotif, readAllNotifs,
     openAnnounce, sendAnnounce, markAnnounceSeen,
     showShiftForm, hideShiftForm, editShift, newShiftFromTpl, saveShift, deleteShift,

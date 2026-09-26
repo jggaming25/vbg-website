@@ -45,6 +45,36 @@
   ],
   "fahrzeuge": [
     {
+      "id": "disp-001",
+      "wagennummer": "Dispo",
+      "kennzeichen": "DISPO-01",
+      "typ": "VW Caddy",
+      "art": "Solo",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Dispositionsfahrzeug"
+    },
+    {
+      "id": "tiguan-001",
+      "wagennummer": "Tiguan_1",
+      "kennzeichen": "TIG-001",
+      "typ": "VW Tiguan",
+      "art": "SUV",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Einsatzleitung / Dispo"
+    },
+    {
+      "id": "tiguan-002",
+      "wagennummer": "Tiguan_2",
+      "kennzeichen": "TIG-002",
+      "typ": "VW Tiguan",
+      "art": "SUV",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Einsatzleitung / Dispo"
+    },
+    {
       "id": "13581d84-16e5-4226-8807-47df962d150b",
       "wagennummer": "2088",
       "kennzeichen": "-",

@@ -256,19 +256,22 @@ function notify(userId, message, type) {
 
 function notifyAll(message, type) {
   const data = db.load();
-  data.users.forEach((u) => {
+  // Nur Supervisoren für systemweite Ankündigungen
+  const supervisors = data.users.filter((u) => u.role === "supervisor");
+  supervisors.forEach((u) => {
     data.notifications.push({
       id: uid(), userId: u.id, message, type: type || "info",
       read: false, createdAt: new Date().toISOString(),
     });
   });
+  // Spezielle "all-supervisors" für Broadcast
   data.notifications.push({
     id: uid(), userId: "all-supervisors", message, type: type || "info",
     read: false, createdAt: new Date().toISOString(),
   });
   db.save();
   const subs = (data.pushSubscriptions || [])
-    .filter((x) => data.users.find((u) => u.id === x.userId));
+    .filter((x) => supervisors.find((u) => u.id === x.userId));
   pushToSubs(subs, pushTitleFor(type), message);
 }
 
@@ -1121,6 +1124,31 @@ function cutDutyToShiftTimes(duty, shift) {
   if (sMin === null && eMin === null) return;
   duty.trips = (duty.trips || []).filter((t) => tripInWindow(t, sMin, eMin));
   recomputeDutyTimes(duty);
+  addLineChangesToDuty(duty);
+}
+
+function addLineChangesToDuty(duty) {
+  const trips = (duty.trips || []).filter((t) => !t.cancelled);
+  if (trips.length < 2) return;
+  const lines = trips.map((t) => t.linieId || duty.linieId).filter(Boolean);
+  const uniqueLines = [...new Set(lines)];
+  if (uniqueLines.length <= 1) return;
+  // Linienwechsel erkennen
+  let lastLine = null;
+  const changes = [];
+  trips.forEach((t) => {
+    const tLine = t.linieId || duty.linieId;
+    if (tLine && tLine !== lastLine) {
+      changes.push({ line: tLine, time: t.dep, from: t.from, to: t.to });
+      lastLine = tLine;
+    }
+  });
+  if (changes.length > 1) {
+    // Ersten Eintrag ist Startlinie, danach Wechsel
+    const startLine = changes[0].line;
+    const switches = changes.slice(1).map((c) => `${c.time} ${c.line} (${c.from}→${c.to})`).join(" | ");
+    duty.linienwechsel = `Start: ${startLine} | Wechsel: ${switches}`;
+  }
 }
 // Bei geänderter Shift-Zeit: vorhandene Fahrten im Fenster behalten (Edits bleiben),
 // außerhalb liegende entfernen und (bei Verlängerung) fehlende Tagesplan-Fahrten ergänzen.
@@ -1182,17 +1210,7 @@ app.post("/api/shifts", requireAuth, requireSupervisor, (req, res) => {
     const tpl = tagesplanShift(data);
     if (tpl) {
       const templateDuties = data.duties.filter((d) => d.shiftId === tpl.id);
-      // Shift-Dauer in Minuten
-      const shiftStartMin = toMin(shift.startTime);
-      const shiftEndMin = toMin(shift.endTime);
-      const shiftDuration = (shiftStartMin !== null && shiftEndMin !== null)
-        ? (shiftEndMin >= shiftStartMin ? shiftEndMin - shiftStartMin : shiftEndMin + 1440 - shiftStartMin)
-        : 0;
-      // Max Dutys: ca. 1 pro 35 Min, aber 5-7 bei 3h
-      const maxDutys = shiftDuration > 0
-        ? Math.min(7, Math.max(5, Math.round(shiftDuration / 35)))
-        : templateDuties.length;
-      templateDuties.slice(0, maxDutys).forEach((d, idx) => {
+      templateDuties.forEach((d, idx) => {
         const nd = {
           ...d,
           id: uid(),
@@ -1232,6 +1250,10 @@ app.patch("/api/shifts/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const s = data.shifts.find((x) => x.id === req.params.id);
   if (!s) return res.status(404).json({ error: "Shift nicht gefunden" });
+  // Nur Host oder Co-Supervisoren dürfen Shift bearbeiten
+  const isHost = s.hostId === req.user.id;
+  const isCo = (s.coSupervisorIds || []).includes(req.user.id);
+  if (!isHost && !isCo) return res.status(403).json({ error: "Nur der Shift-Host oder Co-Supervisoren dürfen diesen Shift bearbeiten" });
   const { name, date, startTime, endTime, notes, hostId, coSupervisorIds } = req.body || {};
   if (typeof name === "string") s.name = name.trim();
   if (typeof date === "string") s.date = date;
@@ -1364,6 +1386,11 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const duty = data.duties.find((d) => d.id === req.params.id);
   if (!duty) return res.status(404).json({ error: "Duty nicht gefunden" });
+  const shift = data.shifts.find((s) => s.id === duty.shiftId);
+  if (!shift) return res.status(404).json({ error: "Shift nicht gefunden" });
+  const isHost = shift.hostId === req.user.id;
+  const isCo = (shift.coSupervisorIds || []).includes(req.user.id);
+  if (!isHost && !isCo) return res.status(403).json({ error: "Nur der Shift-Host oder Co-Supervisoren dürfen diese Duty bearbeiten" });
   const { name, linieId, kurs, vehicleId, notes, bemerkung, cancelled, cancelNote, assignedUserId, unit, startTime, endTime, linienwechsel } = req.body || {};
   let notifyMsg = null;
   if (typeof name === "string") duty.name = name.trim();
@@ -1770,7 +1797,12 @@ app.post("/api/kundenservice", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
   const name = (req.body && req.body.name || "").trim();
   if (!name) return res.status(400).json({ error: "Name fehlt" });
-  const item = { id: uid(), name };
+  const item = {
+    id: uid(),
+    name,
+    startTime: req.body.startTime || "",
+    endTime: req.body.endTime || "",
+  };
   data.kundenservice.push(item);
   db.save();
   res.json({ item });
@@ -1780,6 +1812,8 @@ app.patch("/api/kundenservice/:id", requireAuth, requireSupervisor, (req, res) =
   const k = data.kundenservice.find((x) => x.id === req.params.id);
   if (!k) return res.status(404).json({ error: "Standort nicht gefunden" });
   if (typeof req.body.name === "string") k.name = req.body.name.trim();
+  if (typeof req.body.startTime === "string") k.startTime = req.body.startTime;
+  if (typeof req.body.endTime === "string") k.endTime = req.body.endTime;
   db.save();
   res.json({ item: k });
 });
