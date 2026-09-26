@@ -118,6 +118,12 @@
   }
   const fmtTimestamp = fmtTime;
 
+  function toMin(hhmm) {
+    if (typeof hhmm !== "string" || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+    const p = hhmm.split(":");
+    return Number(p[0]) * 60 + Number(p[1]);
+  }
+
   // ---------- Strafstunden-Frist ----------
   function fmtFristDate(iso) {
     if (!iso) return "";
