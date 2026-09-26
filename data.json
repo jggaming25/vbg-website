@@ -38,7 +38,7 @@
         "lin8",
         "linN1"
       ],
-      "license": "",
+      "license": "Solo,Gelenk",
       "strafstunden": 0,
       "discordName": "tom078274",
       "robloxName": "Schwarzfahrer001",
@@ -63595,6 +63595,14 @@
       "action": "Duty gelöscht",
       "detail": "Duty 9",
       "createdAt": "2026-09-26T10:58:54.423Z"
+    },
+    {
+      "id": "32de453e-7722-47ab-b935-a11927f21f2d",
+      "actorId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "actorName": "Zentrum der Arbeit",
+      "action": "Nutzer bearbeitet",
+      "detail": "Zentrum der Arbeit",
+      "createdAt": "2026-09-26T11:00:16.084Z"
     }
   ],
   "_vapid": {
