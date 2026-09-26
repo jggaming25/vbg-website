@@ -243,11 +243,11 @@
       "id": "bd1c80c2-3bb9-4ee6-bb44-6dc191cc4784",
       "wagennummer": "1460",
       "kennzeichen": "GV-VB 1460",
-      "typ": "Mercedes-Benz C2 G",
+      "typ": "Bus",
       "art": "Gelenk",
       "status": "nicht_einsatzbereit",
-      "ort": "Defekt Bth Neuenburg",
-      "bemerkung": ""
+      "ort": "Betriebshof NeuenburgNeuenburg",
+      "bemerkung": "Defekt"
     },
     {
       "id": "ffdae410-be07-4350-bef2-63899b2d6f01",
@@ -63434,6 +63434,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2004",
       "createdAt": "2026-09-26T10:46:02.796Z"
+    },
+    {
+      "id": "6e906c24-79d3-4a58-a386-248d9453ad65",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "1460",
+      "createdAt": "2026-09-26T10:46:13.828Z"
     }
   ],
   "_vapid": {
