@@ -63379,7 +63379,14 @@
   ],
   "wishes": [],
   "applications": [],
-  "kundenservice": [],
+  "kundenservice": [
+    {
+      "id": "8f67b36f-7098-42a3-b89b-b5b8c930ed59",
+      "name": "Gravenberg ZOB",
+      "startTime": "",
+      "endTime": ""
+    }
+  ],
   "activity": [],
   "notifications": [
     {
