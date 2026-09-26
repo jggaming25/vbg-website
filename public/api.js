@@ -43,6 +43,11 @@ async function api(method, path, body) {
     window.dispatchEvent(new Event("vbg:logout"));
     throw new Error("Nicht angemeldet");
   }
+  if (res.status === 503 && data && data.maintenance) {
+    // Wartungsmodus: Banner anzeigen, ohne den Token zu verlieren
+    window.dispatchEvent(new CustomEvent("vbg:maintenance", { detail: data }));
+    throw new Error(data.error || "Die Website wird gerade gewartet.");
+  }
   if (!res.ok) {
     throw new Error((data && data.error) || "Fehler " + res.status);
   }

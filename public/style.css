@@ -79,6 +79,7 @@ a { color: var(--accent); text-decoration: none; }
 }
 .login-card h1 { margin: 0 0 4px; font-size: 22px; }
 .login-card .sub { color: var(--muted); margin: 0 0 22px; }
+.login-logo { display: block; max-width: 240px; max-height: 90px; width: auto; height: auto; margin: 0 auto 16px; object-fit: contain; }
 .login-card label { display: block; color: var(--muted); margin: 12px 0 4px; }
 .login-card input[type="password"] { width: 100%; }
 .login-card input[type="text"] { width: 100%; }
@@ -100,8 +101,10 @@ a { color: var(--accent); text-decoration: none; }
   top: 0;
   z-index: 50;
 }
-.brand { font-weight: 700; font-size: 16px; letter-spacing: .3px; white-space: nowrap; }
+.brand { font-weight: 700; font-size: 16px; letter-spacing: .3px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
 .brand .sg { color: var(--accent); }
+.brand-logo { display: block; height: 34px; width: auto; flex: 0 0 auto; }
+.brand-nologo .brand-text { display: inline; }
 nav { display: flex; gap: 4px; flex: 1; overflow-x: auto; }
 nav a {
   padding: 7px 12px;
@@ -112,6 +115,17 @@ nav a {
 nav a.active, nav a:hover { background: var(--panel2); color: var(--text); }
 
 .right { display: flex; align-items: center; gap: 10px; }
+
+/* Wartungsmodus-Banner */
+.maint-banner {
+  background: rgba(248,113,113,.12);
+  border-bottom: 1px solid var(--red);
+  color: var(--text);
+  padding: 12px 20px;
+  text-align: center;
+}
+.maint-banner b { color: var(--red); display: block; margin-bottom: 2px; }
+.maint-banner div { color: var(--muted); font-size: 13px; }
 
 .notif-wrap { position: relative; }
 .notif-btn {
@@ -250,6 +264,49 @@ tr:last-child td { border-bottom: none; }
 .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; animation: fadeUp .18s ease; }
 .stat .num { font-size: 26px; font-weight: 700; }
 .stat .lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+/* Activity: gesperrter Einchecken-Button mit Begründung */
+.act-ready {
+  background: rgba(52,211,153,.10);
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  color: var(--green);
+  font-size: 14px;
+}
+.act-locked {
+  background: rgba(251,191,36,.08);
+  border: 1px solid rgba(251,191,36,.55);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.act-locked-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.act-locked-head b { color: var(--yellow); font-size: 15px; }
+.act-why { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.act-bar {
+  position: relative;
+  height: 22px;
+  margin-top: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  overflow: hidden;
+}
+.act-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--yellow), var(--accent));
+  transition: width .3s ease;
+}
+.act-bar-lbl {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--text);
+  text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.act-when { margin-top: 10px; font-size: 13px; }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
 
 .duty-card { background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; animation: fadeUp .18s ease; }
 .duty-card.cancelled { border: 2px dashed var(--red); background: rgba(239,68,68,.06); }

@@ -248,11 +248,44 @@
     wrap.style.display = sel.value === BUSTYP_SONSTIGE ? "" : "none";
   }
 
+  function toggleFzSort() {
+    state.fzSortByTyp = !state.fzSortByTyp;
+    render();
+  }
+
+  // Eine einzige Spalte "Typ": Bustyp (Solo/Gelenk/…) als Badge vor dem Bezeichner.
+  // Reihenfolge im Text ist bewusst "Bustyp zuerst", damit die Liste nach Bauart
+  // sortierbar bleibt (Solo, Gelenk, dann die Eigenbezeichnungen alphabetisch).
+  const BUSTYP_RANG = { Solo: 0, Gelenk: 1 };
+  function bustypCls(art) {
+    return art === "Solo" ? "sky" : art === "Gelenk" ? "violet" : "yellow";
+  }
+  function bustypSortKey(art) {
+    const a = art || "";
+    const r = BUSTYP_RANG[a];
+    return r != null ? String(r).padStart(2, "0") : "50";
+  }
+  function vehicleTypSortKey(f) {
+    return bustypSortKey(f.art) + "|" + String(f.typ || "").toLowerCase() + "|" + String(f.wagennummer || "");
+  }
+  function vehicleTypCell(f) {
+    const badge = f.art
+      ? `<span class="badge ${bustypCls(f.art)}">${h(bustypLabel(f.art))}</span>`
+      : "";
+    const typ = f.typ ? h(f.typ) : "";
+    if (badge && typ) return `${badge} <span style="margin-left:4px">${typ}</span>`;
+    if (badge) return badge;
+    return typ ? typ : `<span class="muted">–</span>`;
+  }
+
   // ---------- State ----------
   const state = {
     user: null,
     view: "dashboard",
     superTab: "users",
+    maintenance: { enabled: false, reason: "" },
+    fzSortByTyp: false,
+    planKs: { shiftId: null, byStandort: {} },
     cats: { linien: [], fahrzeuge: [] },
     users: [],
     shifts: [],
@@ -327,6 +360,9 @@
       state.plan = null;
       if (e && e.message && e.message.includes("404")) { state.planShiftId = null; }
     }
+    // Kundenservice-Planung (Slots) für alle sichtbar im Shiftplan mitladen
+    if (!(KUNDENSERVICE_STATE.items || []).length) await loadKundenservice();
+    await loadPlanKs(state.planShiftId);
   }
 
   async function loadFahrtenbuch() {
@@ -416,12 +452,69 @@
     if (!state.user) { app.innerHTML = renderLogin(); return; }
     if (state.user.mustChangePassword && !state.forcePwDone) { app.innerHTML = renderForcePasswordChange(); return; }
     app.innerHTML = `
+      ${renderMaintenanceBanner()}
       ${renderTopbar()}
       <div id="announce-banner"></div>
       <main>${renderView()}</main>`;
     renderTopbarBadge();
     initFahrzeugDnd();
     initCarousel();
+  }
+
+  // ---------- Wartungsmodus ("Webseite steuern") ----------
+  async function loadMaintenance() {
+    try {
+      const r = await fetch((window.VBG_API_BASE || "") + "/api/maintenance");
+      state.maintenance = await r.json();
+    } catch (e) { state.maintenance = { enabled: false, reason: "" }; }
+  }
+
+  function maintenanceOn() {
+    return !!(state.maintenance && state.maintenance.enabled);
+  }
+
+  // Supervisor sieht den Hinweis nicht als Sperre – er muss die Seite bedienen können.
+  function renderMaintenanceBanner() {
+    if (!maintenanceOn() || isSup()) return "";
+    return `
+      <div class="maint-banner">
+        <b>Website vorübergehend im Wartungsmodus</b>
+        <div>${h(state.maintenance.reason || "Bitte später erneut versuchen.")}</div>
+      </div>`;
+  }
+
+  function superWebseiteView() {
+    const m = state.maintenance || { enabled: false, reason: "" };
+    return `
+      <h2>Webseite steuern</h2>
+      <div class="container">
+        <p class="muted">Mit dem Wartungsmodus sperrst du die Website für alle Nutzer.
+        <b>Supervisoren bleiben angemeldet</b> und können den Modus jederzeit wieder ausschalten.</p>
+        <div class="form-grid" style="max-width:520px">
+          <label>Grund (wird allen Nutzern angezeigt)
+            <input id="mnt-reason" type="text" value="${h(m.reason || "")}" placeholder="z. B. Wartung bis 18 Uhr"/>
+          </label>
+        </div>
+        <div class="flex" style="margin-top:12px">
+          <button class="btn ${m.enabled ? "btn-green" : "btn-yellow"}" onclick="VBG.setMaintenance(${m.enabled ? "false" : "true"})">
+            ${m.enabled ? "Wartungsmodus ausschalten" : "Wartungsmodus einschalten"}
+          </button>
+        </div>
+        <div style="margin-top:18px;padding:12px;border-radius:8px;border:1px solid ${m.enabled ? "var(--red)" : "var(--green)"};background:var(--panel)">
+          <b>Status:</b> ${m.enabled ? `<span class="badge red">aktiv</span>` : `<span class="badge green">aus</span>`}
+          ${m.setBy ? `<div class="muted" style="margin-top:6px;font-size:12px">Zuletzt geändert von ${h(m.setBy)} – ${h(m.setAt || "")}</div>` : ""}
+        </div>
+      </div>`;
+  }
+
+  async function setMaintenance(enabled) {
+    const reason = document.getElementById("mnt-reason").value.trim();
+    try {
+      await api("POST", "/api/maintenance", { enabled, reason });
+      await loadMaintenance();
+      toast(enabled ? "Wartungsmodus aktiviert" : "Wartungsmodus ausgeschaltet", "ok");
+      render();
+    } catch (e) { toast(e.message, "err"); }
   }
 
   function renderForcePasswordChange() {
@@ -460,6 +553,7 @@
     return `
     <div class="login-wrap">
       <div class="login-card">
+        <img class="login-logo" src="logo.png" alt="VBG" onerror="this.style.display='none'" />
         <h1>VBG <span style="color:var(--accent)">Organisation</span></h1>
         <p class="sub">Fahrplan-Org &amp; Einsatzplanung</p>
         <div>
@@ -493,7 +587,10 @@
 
     return `
     <header class="topbar">
-      <div class="brand">VBG <span class="sg">•</span> Orga</div>
+      <div class="brand">
+        <img class="brand-logo" src="logo.png" alt="VBG" onerror="this.style.display='none';this.parentNode.classList.add('brand-nologo')" />
+        <span class="brand-text">VBG <span class="sg">•</span> Orga</span>
+      </div>
       <nav>${links}</nav>
       <div class="right">
         ${isSup() ? `
@@ -885,6 +982,9 @@ function superProtokollView() {
         <div id="standort-form"></div>
       </div>`;
 
+    // ---- Kundenservice-Slotplanung (für alle sichtbar) ----
+    html += ksPlanungView(state.planShiftId);
+
     // ---- Dutys ----
     if (duties.length === 0) {
       html += `<div class="container"><div class="empty">Diese Shift hat noch keine Dutys.</div>
@@ -1162,8 +1262,10 @@ function superProtokollView() {
     }
     const fahrMin = me.fahrMin || 0;
     const spanneMin = me.spanneMin || 0;
-    const threshold = Math.round(spanneMin * 0.6);
-    const bereit = fahrMin >= threshold;
+    // Freigabe kommt aus dem Backend (gleiche Logik wie beim Absenden), damit der
+    // Button nicht klickbar ist, obwohl das Backend die Anmeldung ablehnen würde.
+    const b = me.bereit || { bereit: false, grund: "", anteilPct: 0, faehrt60: Math.round(fahrMin * 0.6), freiAb: null, naechsteShift: null };
+    const bereit = !!b.bereit;
     const MOENTLICHES_ZIEL = 240;
     const monFahr = month.fahrMin || 0;
     const monOk = monFahr >= MOENTLICHES_ZIEL;
@@ -1205,10 +1307,51 @@ function superProtokollView() {
           <div class="lbl">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)${monOk ? " – erreicht" : ` – noch ${fmtMin(monRest)}`}</div></div>
       </div>
       <div class="container">
-        <p class="muted">Du kannst dich für Activity anmelden, sobald deine reine Fahrzeit <b>60&nbsp;% der gesamten Shift-Zeit</b> (mit Pausen) erreicht hat.</p>
-        <button class="btn btn-yellow" ${bereit ? "" : "disabled"} onclick="VBG.signupActivity()">
-          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (60 % der Shift-Zeit als Fahrzeit nötig)"}
-        </button>
+        <p class="muted">Activity wird erst freigeschaltet, wenn deine Shift <b>läuft</b> und seit dem Shiftbeginn
+        <b>60&nbsp;% deiner reinen Fahrzeit</b> (ohne Pausen) vergangen sind.</p>
+        ${
+          bereit
+            ? `<div class="act-ready">
+                 <b>Freigeschaltet</b> – du kannst dich jetzt für Activity anmelden.
+               </div>
+               <button class="btn btn-green" onclick="VBG.signupActivity()">Für Activity anmelden</button>`
+            : `<div class="act-locked">
+                 <div class="act-locked-head">
+                   <b>Gesperrt</b>
+                   <span class="badge yellow">60-%-Regel nicht erfüllt</span>
+                 </div>
+                 <div class="act-why">${h(b.grund || "Aktuell keine Activity-Anmeldung möglich.")}</div>
+                 ${bar(b)}
+                 ${freiAb(b)}
+               </div>
+               <button class="btn btn-yellow" disabled title="${h(b.grund || "")}">
+                 ${bereit ? "" : "Jetzt nicht verfügbar"}
+               </button>`
+        }
+      </div>`;
+  }
+
+  // Fortschrittsbalken zur 60-%-Freigabe
+  function bar(b) {
+    const pct = Math.max(0, Math.min(100, b.anteilPct || 0));
+    return `
+      <div class="act-bar" title="${pct} % bis zur Freigabe">
+        <div class="act-bar-fill" style="width:${pct}%"></div>
+        <span class="act-bar-lbl">${pct} % bis 60 %</span>
+      </div>`;
+  }
+
+  // Wann wird es freigeschaltet?
+  function freiAb(b) {
+    if (!b.freiAb) return "";
+    const d = new Date(b.freiAb);
+    if (Number.isNaN(d.getTime())) return "";
+    const restMin = Math.max(0, Math.ceil((d.getTime() - Date.now()) / 60000));
+    const zeit = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    return `
+      <div class="act-when">
+        Freigabe automatisch ab <b>${h(d.toISOString().slice(0, 10))} ${h(zeit)}</b> Uhr
+        ${restMin > 0 ? `<span class="muted">(noch ${fmtMin(restMin)})</span>` : ""}
       </div>`;
   }
 
@@ -1444,7 +1587,12 @@ function superProtokollView() {
   }
 
   function renderFahrzeuge() {
-    const fzs = state.fahrzeuge || [];
+    const alle = state.fahrzeuge || [];
+    // Standardsortierung ist die bewusst gesetzte Reihenfolge (Drag & Drop).
+    // "Nach Typ sortieren" ist nur eine Ansichts-Sortierung und überschreibt sie nicht.
+    const fzs = state.fzSortByTyp
+      ? alle.slice().sort((a, b) => vehicleTypSortKey(a).localeCompare(vehicleTypSortKey(b)))
+      : alle;
     const canEdit = isSup();
     return `
       <h2>Fahrzeugübersicht</h2>
@@ -1457,10 +1605,10 @@ function superProtokollView() {
             ${bustypField("fz", "")}
             <label>Typ<select id="fz-typ">
               <option value="Bus">Bus</option>
-              <option value="Sonderfahrzeug">Sonderfahrzeug</option>
               <option value="Ersatzwagen">Ersatzwagen</option>
               <option value="Fahrschule">Fahrschule</option>
               <option value="Reserve">Reserve</option>
+              <option value="Sonderfahrzeug">Sonderfahrzeug</option>
             </select></label>
             <label>Status<select id="fz-status">
               <option value="einsatzbereit">Einsatzbereit</option>
@@ -1477,11 +1625,16 @@ function superProtokollView() {
         </div>
       ` : ""}
       <div class="container">
-        ${canEdit ? `<p class="muted" style="margin:0 0 10px">Reihenfolge der Busse per Drag&nbsp;&amp;&nbsp;Drop an der linken Spalte ändern.</p>` : ""}
+        <div class="spread" style="margin:0 0 10px">
+          ${canEdit ? `<span class="muted">Reihenfolge der Busse per Drag&nbsp;&amp;&nbsp;Drop an der linken Spalte ändern.</span>` : `<span></span>`}
+          <button class="btn btn-ghost btn-xs" onclick="VBG.toggleFzSort()">
+            ${state.fzSortByTyp ? "Eigene Reihenfolge" : "Nach Typ sortieren"}
+          </button>
+        </div>
         <table id="fzTable">
           <thead><tr>
             ${canEdit ? `<th style="width:34px"></th>` : ""}
-            <th>Wagennummer</th><th>Kennzeichen</th><th>Bustyp</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
+            <th>Wagennummer</th><th>Kennzeichen</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
             ${canEdit ? `<th>Aktionen</th>` : ""}
           </tr></thead>
           <tbody id="fzBody">
@@ -1490,8 +1643,7 @@ function superProtokollView() {
                 ${canEdit ? `<td class="fz-drag" title="Zum Verschieben ziehen">⠿</td>` : ""}
                 <td>${h(f.wagennummer || "–")}</td>
                 <td>${h(f.kennzeichen || "–")}</td>
-                <td>${f.art ? `<span class="badge ${f.art === "Solo" ? "sky" : f.art === "Gelenk" ? "violet" : "yellow"}">${h(bustypLabel(f.art))}</span>` : `<span class="muted">–</span>`}</td>
-                <td>${h(f.typ || "–")}</td>
+                <td>${vehicleTypCell(f)}</td>
                 <td><span class="badge ${(VEHICLE_STATUS[f.status] || {}).cls || "gray"}">${h((VEHICLE_STATUS[f.status] || {}).label || f.status)}</span></td>
                 <td>${h(f.ort || "–")}</td>
                 <td>${h(f.bemerkung || "–")}</td>
@@ -1500,7 +1652,7 @@ function superProtokollView() {
                   <button class="btn btn-danger btn-xs" onclick="VBG.deleteFahrzeug('${f.id}')">Löschen</button>
                 </td>` : ""}
               </tr>
-            `).join("") : `<tr><td colspan="${canEdit ? 9 : 8}" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
+            `).join("") : `<tr><td colspan="${canEdit ? 8 : 7}" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1676,6 +1828,7 @@ function superProtokollView() {
       { id: "anmeldungen", label: "Anmeldungen" },
       { id: "kundenservice", label: "Kundenservice" },
       { id: "activity", label: "Activity" },
+      { id: "webseite", label: "Webseite" },
       { id: "protokoll", label: "Protokoll" },
       { id: "backup", label: "Backup" },
     ];
@@ -1686,6 +1839,7 @@ function superProtokollView() {
     else if (state.superTab === "anmeldungen") body = superAnmeldungenView();
     else if (state.superTab === "kundenservice") body = superKundenserviceView();
     else if (state.superTab === "activity") body = activityAllView();
+    else if (state.superTab === "webseite") body = superWebseiteView();
     else if (state.superTab === "protokoll") body = superProtokollView();
     else if (state.superTab === "backup") body = superBackupView();
     return `<h2>Supervisor</h2>${tabHtml}${body}`;
@@ -1737,18 +1891,22 @@ function superProtokollView() {
       (KS_STATE.sub === "slots" ? ksSlotsView() : ksArbeitView());
   }
 
-  function ksSlotsView() {
-    if (!KS_STATE.standortId) return `<div class="container"><p class="muted">Bitte einen Standort wählen.</p></div>`;
-    if (!KS_STATE.slots) return `<div class="container"><div class="spinner">Lade Slots…</div></div>`;
-    const slots = KS_STATE.slots;
-    if (!slots.length) return `<div class="container"><p class="muted">Für diesen Standort/Shift gibt es keine 30-Minuten-Slots.</p></div>`;
-    const apps = KS_STATE.applications || [];
-    const appById = new Map(apps.map((a) => [a.id, a]));
-
+  // Slot-Tabelle – editable=true nur für Supervisor (Zuteilung + Zeiteintrag),
+  // editable=false für alle anderen (lesende Übersicht "wer hat welchen Slot").
+  function ksSlotTable(slots, apps, editable) {
+    const appById = new Map((apps || []).map((a) => [a.id, a]));
     const zellen = slots.map((s) => {
       const app = s.belegtVon ? appById.get(s.belegtVon) : null;
+      if (!editable) {
+        const name = app ? (app.displayName || app.username) : "";
+        return `
+          <tr>
+            <td><b>${h(s.von)}–${h(s.bis)}</b></td>
+            <td>${name ? `<span class="badge sky">${h(name)}</span>` : `<span class="muted">frei</span>`}</td>
+          </tr>`;
+      }
       const opt = `<option value="" ${!s.belegtVon ? "selected" : ""}>— frei —</option>` +
-        apps.map((a) => `<option value="${a.id}" ${s.belegtVon === a.id ? "selected" : ""}>${h(a.username)}${a.von ? " (" + h(a.von) + "–" + h(a.bis) + ")" : ""}</option>`).join("");
+        (apps || []).map((a) => `<option value="${a.id}" ${s.belegtVon === a.id ? "selected" : ""}>${h(a.username)}${a.von ? " (" + h(a.von) + "–" + h(a.bis) + ")" : ""}</option>`).join("");
       return `
         <tr>
           <td><b>${h(s.von)}–${h(s.bis)}</b></td>
@@ -1762,13 +1920,94 @@ function superProtokollView() {
         </tr>`;
     }).join("");
 
-    return `
-      <div class="container">
-        <p class="muted" style="margin:0 0 10px">Slots à 30 Minuten. Anmeldungen manuell zuordnen; pro Person keine Überschneidung.</p>
+    if (editable) {
+      return `
         <table>
           <thead><tr><th style="width:130px">Zeit</th><th>Anmeldung</th><th style="width:150px">Abarbeitung</th></tr></thead>
           <tbody>${zellen}</tbody>
-        </table>
+        </table>`;
+    }
+    return `
+      <table>
+        <thead><tr><th style="width:130px">Zeit</th><th>Belegung</th></tr></thead>
+        <tbody>${zellen}</tbody>
+      </table>`;
+  }
+
+  function ksSlotsView() {
+    if (!KS_STATE.standortId) return `<div class="container"><p class="muted">Bitte einen Standort wählen.</p></div>`;
+    if (!KS_STATE.slots) return `<div class="container"><div class="spinner">Lade Slots…</div></div>`;
+    const slots = KS_STATE.slots;
+    if (!slots.length) return `<div class="container"><p class="muted">Für diesen Standort/Shift gibt es keine 30-Minuten-Slots.</p></div>`;
+    return `
+      <div class="container">
+        <p class="muted" style="margin:0 0 10px">Slots à 30 Minuten. Anmeldungen manuell zuordnen; pro Person keine Überschneidung.</p>
+        ${ksSlotTable(slots, KS_STATE.applications || [], true)}
+      </div>`;
+  }
+
+  // ---------- Kundenservice-Planung im Shiftplan (für alle sichtbar) ----------
+  async function loadPlanKs(shiftId) {
+    if (state.planKs.shiftId === shiftId) return;
+    const standorte = KUNDENSERVICE_STATE.items || [];
+    if (!standorte.length) { state.planKs = { shiftId, byStandort: {} }; return; }
+    const byStandort = {};
+    await Promise.all(
+      standorte.map(async (k) => {
+        try {
+          const q = "?standortId=" + encodeURIComponent(k.id) +
+            (shiftId ? "&shiftId=" + encodeURIComponent(shiftId) : "");
+          const r = await api("GET", "/api/kundenservice/slots" + q);
+          byStandort[k.id] = { slots: r.slots || [], applications: r.applications || [] };
+        } catch (e) { byStandort[k.id] = null; }
+      })
+    );
+    state.planKs = { shiftId, byStandort };
+  }
+
+  function ksPlanungView(shiftId) {
+    const standorte = KUNDENSERVICE_STATE.items || [];
+    if (!standorte.length) {
+      return `<div class="container">
+        <h2 style="margin:0 0 4px">Kundenservice-Planung</h2>
+        <p class="muted">Noch kein Kundenservice-Standort angelegt.</p></div>`;
+    }
+    if (state.planKs.shiftId !== shiftId) {
+      return `<div class="container">
+        <h2 style="margin:0 0 4px">Kundenservice-Planung</h2>
+        <div class="spinner">Lade Kundenservice-Planung…</div></div>`;
+    }
+    const koepfe = standorte.map((k) => {
+      const d = state.planKs.byStandort[k.id];
+      if (d === null) {
+        return `<div class="duty-card" style="margin:0 0 10px">
+          <div class="duty-head"><b>${h(k.name)}</b></div>
+          <div class="duty-meta">Slots konnten nicht geladen werden.</div></div>`;
+      }
+      const slots = d.slots || [];
+      const belegt = slots.filter((s) => s.belegtVon).length;
+      if (!slots.length) {
+        return `<div class="duty-card" style="margin:0 0 10px">
+          <div class="duty-head"><b>${h(k.name)}</b></div>
+          <div class="duty-meta">${k.startTime && k.endTime ? h(k.startTime) + "–" + h(k.endTime) + " · " : ""}keine 30-Minuten-Slots für diese Shift</div>
+        </div>`;
+      }
+      return `
+        <div class="duty-card" style="margin:0 0 10px">
+          <div class="duty-head">
+            <b>${h(k.name)}</b>
+            <span class="badge ${belegt ? "sky" : "gray"}">${belegt}/${slots.length} belegt</span>
+            ${k.startTime && k.endTime ? `<span class="muted" style="font-size:12px">${h(k.startTime)}–${h(k.endTime)}</span>` : ""}
+          </div>
+          <div style="margin-top:8px">${ksSlotTable(slots, d.applications || [], isSup())}</div>
+        </div>`;
+    }).join("");
+
+    return `
+      <div class="container">
+        <h2 style="margin:0 0 4px">Kundenservice-Planung</h2>
+        <p class="muted" style="margin:0 0 12px">Slots à 30 Minuten. ${isSup() ? "Als Supervisor kannst du die Anmeldungen hier zuordnen." : "Hier siehst du, wer eingeplant ist."}</p>
+        ${koepfe}
       </div>`;
   }
 
@@ -1814,9 +2053,17 @@ function superProtokollView() {
         applicationId: applicationId || null,
       });
       toast("Zuordnung gespeichert", "ok");
+      state.planKs = { shiftId: null, byStandort: {} }; // Shiftplan-Ansicht neu laden
       await loadKsSlots();
+      await loadPlanKs(state.planShiftId);
       render();
-    } catch (e) { toast(e.message, "err"); await loadKsSlots(); render(); }
+    } catch (e) {
+      toast(e.message, "err");
+      state.planKs = { shiftId: null, byStandort: {} };
+      await loadKsSlots();
+      await loadPlanKs(state.planShiftId);
+      render();
+    }
   }
 
   function ksZeitEintragen(slotId) {
@@ -2455,6 +2702,7 @@ function superProtokollView() {
 
   async function bootstrapAfterLogin() {
     await refreshAll();
+    await loadMaintenance();
     if (isSup()) {
       await loadUsers();
       await loadAppsAll();
@@ -3322,6 +3570,12 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
   // 401 (z. B. abgelaufener Session-Token) → sauber ausloggen, kein Hängenbleiben auf der View
   window.addEventListener("vbg:logout", doLogout);
 
+  // 503 aus dem Wartungsmodus → Banner einblenden, Session bleibt bestehen
+  window.addEventListener("vbg:maintenance", (e) => {
+    state.maintenance = { enabled: true, reason: (e.detail && e.detail.error) || "" };
+    render();
+  });
+
   // ---------- Polling ----------
   let pollTimer = null;
   let notifPollTimer = null;
@@ -3445,8 +3699,9 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
-    toggleBustypFrei,
+    toggleBustypFrei, toggleFzSort,
     setKsSub, setKsStandort, setKsShift, assignKsSlot, ksZeitEintragen, ksApprove, ksReject,
+    loadMaintenance, setMaintenance,
     loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug, backupNow,
     forceAssignDutyVehicle, forceAssignTripVehicle,
   };

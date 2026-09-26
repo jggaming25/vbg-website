@@ -8,6 +8,7 @@ const webpush = require("web-push");
 const db = require("./db");
 
 const app = express();
+app.set("trust proxy", true); // Render läuft hinter Reverse-Proxy -> echte Client-IP
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -596,19 +597,145 @@ function requireSupervisor(req, res, next) {
   next();
 }
 
+// ---------- Wartungsmodus ("Webseite steuern") ----------
+// Im Wartungsmodus liefern alle /api-Endpunkte 503 – ausser Login, "wer bin ich",
+// Statusabfrage und Supervisor-Zugriff. Die statischen Dateien bleiben erreichbar,
+// damit das Frontend eine Wartungsseite anzeigen kann.
+const MAINTENANCE_ALLOW = ["/api/auth/login", "/api/auth/me", "/api/maintenance"];
+
+function blockDuringMaintenance(req, res, next) {
+  if (!req.path.startsWith("/api/")) return next();
+  if (MAINTENANCE_ALLOW.includes(req.path)) return next();
+  const data = db.load();
+  const m = data.maintenance;
+  if (!m || !m.enabled) return next();
+  const token = authToken(req);
+  const user = token ? data.users.find((u) => u.id === token.sub) : null;
+  if (user && user.role === "supervisor") return next();
+  res.status(503).json({
+    error: m.reason || "Die Website wird gerade gewartet.",
+    maintenance: true,
+  });
+}
+
+// Wartungsmodus abfragen (öffentlich, damit die Login-Seite den Hinweis zeigen kann)
+app.get("/api/maintenance", (req, res) => {
+  const m = db.load().maintenance || {};
+  res.json({ enabled: !!m.enabled, reason: m.reason || "", setBy: m.setBy || null, setAt: m.setAt || null });
+});
+
+app.post("/api/maintenance", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  if (!data.maintenance) data.maintenance = { enabled: false, reason: "", setBy: null, setAt: null };
+  const { enabled, reason } = req.body || {};
+  const on = !!enabled;
+  const changed = data.maintenance.enabled !== on;
+  data.maintenance.enabled = on;
+  data.maintenance.reason = String(reason || "").slice(0, 300);
+  data.maintenance.setBy = req.user.username || req.user.id;
+  data.maintenance.setAt = new Date().toISOString();
+  db.save();
+  if (changed) {
+    audit(data, req.user, on ? "Wartungsmodus aktiviert" : "Wartungsmodus deaktiviert", data.maintenance.reason);
+  }
+  res.json({ ok: true, maintenance: data.maintenance });
+});
+
+// Muss vor allen Routen registriert werden, damit die Sperre greift.
+app.use(blockDuringMaintenance);
+
+// ---------- Discord-Webhook (nur serverseitig, nie an das Frontend ausliefern) ----------
+// WICHTIG: Die Webhook-URL ist ein Geheimnis. Sie gehört NIE in public/app.js oder
+// index.html, sonst steht sie für jeden Besucher im Klartext im Quellcode und der
+// Channel lässt sich von außen zuspammen. Konfiguration ausschließlich per Env-Variable.
+const DISCORD_WEBHOOK_URLS = String(process.env.DISCORD_WEBHOOK_URL || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => /^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/\d+\/.+/.test(s));
+
+function notifyDiscord(embed) {
+  if (!DISCORD_WEBHOOK_URLS.length) return;
+  const payload = JSON.stringify({ username: "VBG Orga", embeds: [embed] });
+  for (const url of DISCORD_WEBHOOK_URLS) {
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          console.error("Discord-Webhook abgelehnt:", res.status, (await res.text()).slice(0, 200));
+        }
+      })
+      .catch((e) => console.error("Discord-Webhook:", e.message));
+  }
+}
+
+// Fehlversuche pro Nutzer/IP drosseln, damit ein Angreifer den Channel nicht fluten kann.
+const FAILED_LOGIN_WINDOW_MS = 5 * 60 * 1000;
+const failedLoginSeen = new Map();
+
+function shouldReportFailedLogin(key) {
+  const now = Date.now();
+  for (const [k, t] of failedLoginSeen) {
+    if (now - t > FAILED_LOGIN_WINDOW_MS) failedLoginSeen.delete(k);
+  }
+  const last = failedLoginSeen.get(key) || 0;
+  if (now - last < FAILED_LOGIN_WINDOW_MS) return false;
+  failedLoginSeen.set(key, now);
+  return true;
+}
+
+function reqMeta(req) {
+  const ua = String(req.headers["user-agent"] || "");
+  const shortUa = ua.length > 120 ? ua.slice(0, 120) + "…" : ua;
+  return { ip: req.ip || req.socket?.remoteAddress || "unbekannt", ua: shortUa || "unbekannt" };
+}
+
+function discordLoginEmbed(user, meta, ok, note) {
+  const color = ok ? 0x22c55e : 0xef4444;
+  return {
+    title: ok ? "✅ Login erfolgreich" : "⚠️ Login fehlgeschlagen",
+    color,
+    fields: [
+      { name: "Benutzer", value: "`" + (user.username || "?") + "`", inline: true },
+      { name: "Name", value: user.displayName || user.username || "?", inline: true },
+      { name: "Rolle", value: ROLE_LABELS[user.role] || user.role || "?", inline: true },
+      { name: "IP", value: "`" + meta.ip + "`", inline: true },
+      { name: "Gerät", value: meta.ua, inline: false },
+      ...(note ? [{ name: "Hinweis", value: note, inline: false }] : []),
+    ],
+    footer: { text: "VBG Orga Login-Log" },
+    timestamp: new Date().toISOString(),
+  };
+}
+
 app.post("/api/auth/login", async (req, res) => {
   const data = db.load();
   const { username, password, remember } = req.body || {};
+  const meta = reqMeta(req);
   const user = data.users.find(
     (u) => (u.username || "").toLowerCase() === (username || "").trim().toLowerCase()
   );
   if (!user || !(await bcrypt.compare(password || "", user.passwordHash || ""))) {
+    const key = (username || "?") + "@" + meta.ip;
+    if (shouldReportFailedLogin(key)) {
+      notifyDiscord(
+        discordLoginEmbed({ username: (username || "(leer)").trim() || "(leer)" }, meta, false,
+          user ? "Passwort falsch" : "Benutzername unbekannt")
+      );
+    }
     return res.status(401).json({ error: "Falscher Benutzername oder Passwort" });
   }
-  if (user.suspended) return res.status(403).json({ error: "Konto ist gesperrt" });
+  if (user.suspended) {
+    const key = (username || "?") + "@" + meta.ip;
+    if (shouldReportFailedLogin(key)) notifyDiscord(discordLoginEmbed(user, meta, false, "Konto ist gesperrt"));
+    return res.status(403).json({ error: "Konto ist gesperrt" });
+  }
   const token = jwt.sign({ sub: user.id, role: user.role }, SECRET, {
     expiresIn: remember ? TOKEN_TIMEOUT.remember : TOKEN_TIMEOUT.normal,
   });
+  notifyDiscord(discordLoginEmbed(user, meta, true));
   res.json({ token, user: publicUser(user) });
 });
 
@@ -1957,23 +2084,41 @@ function ksFromMin(min) {
 
 // Erzeugt die 30-Min-Slots für einen Standort innerhalb einer Shift.
 // Berücksichtigt die Standort-Zeiten (startTime/endTime) und die Shiftgrenzen.
+// Endet eine Zeit vor der Startzeit, läuft das Zeitfenster über Mitternacht
+// (z. B. 22:00–04:00) und wird deshalb um 1440 Min verlängert – sonst gäbe es
+// bei Nachtschifts gar keine Slots.
+// Gibt zusätzlich startMin zurück, damit die Slots chronologisch (und bei
+// Nachtschifts in der richtigen Reihenfolge) sortiert werden können.
 function ksBuildSlots(standort, shift) {
   const sStart = toMin(standort.startTime) || 0;
-  const sEnd = toMin(standort.endTime) || 24 * 60;
-  const shStart = shift ? toMin(shift.startTime) : null;
-  const shEnd = shift ? toMin(shift.endTime) : null;
+  let sEnd = toMin(standort.endTime) || 24 * 60;
+  if (sEnd <= sStart) sEnd += 1440;
+
   let von = sStart;
   let bis = sEnd;
-  if (shStart != null) von = Math.max(von, shStart);
-  if (shEnd != null) bis = Math.min(bis, shEnd);
-  if (bis <= von) return [];
+  if (shift) {
+    const shStart = toMin(shift.startTime);
+    if (shStart != null) {
+      const shEndRaw = toMin(shift.endTime);
+      const shEnd = shEndRaw == null ? null : (shEndRaw <= shStart ? shEndRaw + 1440 : shEndRaw);
+      von = Math.max(von, shStart);
+      if (shEnd != null) bis = Math.min(bis, shEnd);
+    }
+  }
+  if (bis <= von) return { startMin: von, slots: [] };
   // auf das 30-Minuten-Raster aufrunden
   const start = Math.ceil(von / KS_SLOT_MIN) * KS_SLOT_MIN;
   const slots = [];
   for (let t = start; t + KS_SLOT_MIN <= bis; t += KS_SLOT_MIN) {
     slots.push({ von: ksFromMin(t), bis: ksFromMin(t + KS_SLOT_MIN), min: KS_SLOT_MIN });
   }
-  return slots;
+  return { startMin: start, slots };
+}
+
+// Offset eines Slots ab Fensterstart – damit "00:30" bei einer Nachtschicht
+// hinter "22:00" einsortiert wird und nicht davor.
+function ksSlotOffset(von, startMin) {
+  return ((toMin(von) - startMin) % 1440 + 1440) % 1440;
 }
 
 // Slots eines Standorts holen (erzeugt sie bei Bedarf einmalig und speichert sie)
@@ -1982,14 +2127,15 @@ function ksSlotsFor(data, standortId, shiftId) {
   if (!standort) return [];
   const shift = shiftId ? data.shifts.find((s) => s.id === shiftId) : null;
   const key = shiftId || "ohne-shift";
+  const { startMin, slots: sollSlots } = ksBuildSlots(standort, shift);
   const vorhanden = (data.ksSlots || []).filter((s) => s.standortId === standortId && s.shiftKey === key);
   if (vorhanden.length) {
     return vorhanden
       .slice()
-      .sort((a, b) => a.von.localeCompare(b.von))
+      .sort((a, b) => ksSlotOffset(a.von, startMin) - ksSlotOffset(b.von, startMin))
       .map((s) => ({ ...s, standortName: standort.name }));
   }
-  const gebaut = ksBuildSlots(standort, shift).map((s) => ({
+  const gebaut = sollSlots.map((s) => ({
     id: uid(),
     standortId,
     standortName: standort.name,
@@ -2214,6 +2360,77 @@ function fahrZeitData(fromDateStr) {
   return proUser;
 }
 
+// Freigabe-Logik für Activity: EINMAL hier, damit Anzeige (GET /me) und
+// Anmeldung (POST /signup) nie auseinanderlaufen.
+// Regel: erst NACH Shiftbeginn, und erst wenn 60 % der reinen Fahrzeit
+// seit Shiftbeginn vergangen sind.
+function fmtMin(m) {
+  const x = Math.max(0, Math.round(Number(m) || 0));
+  return x + " Min";
+}
+
+function activityBereitschaft(data, user, fahrMinRaw) {
+  const nowMs = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
+  const fahrMin = Number(fahrMinRaw) || 0;
+  const benoetigtMs = Math.round(fahrMin * 60 * 1000 * 0.6);
+  const faehrt60 = Math.round(fahrMin * 0.6);
+
+  const userShifts = data.shifts
+    .filter((s) => {
+      if (!s.date || s.cancelled) return false;
+      const duty = data.duties.find((d) => d.shiftId === s.id && d.assignedUserId === user.id);
+      return duty && s.date >= today;
+    })
+    .sort((a, b) => (a.date + " " + (a.startTime || "")).localeCompare(b.date + " " + (b.startTime || "")));
+
+  const info = (s) => (s ? { id: s.id, name: s.name, date: s.date, startTime: s.startTime || "" } : null);
+  const keineDaten = {
+    bereit: false, faehrt60, anteilPct: 0, freiAb: null, naechsteShift: null,
+    grund: "Du hast gerade keine Shift mit einer eingeteilten Duty – deshalb kann die 60-%-Regel nicht ausgewertet werden.",
+  };
+  if (!userShifts.length) return keineDaten;
+
+  let wartend = null;
+  for (const shift of userShifts) {
+    if (!shift.startTime) continue;
+    const startMs = new Date(shift.date + "T" + shift.startTime).getTime();
+    if (Number.isNaN(startMs) || nowMs < startMs) continue; // noch nicht gestartet
+    const freiAbMs = startMs + benoetigtMs;
+    if (nowMs >= freiAbMs) {
+      return {
+        bereit: true, faehrt60, anteilPct: 100,
+        freiAb: new Date(freiAbMs).toISOString(), naechsteShift: info(shift), grund: "",
+      };
+    }
+    if (!wartend) wartend = { shift, startMs, freiAbMs };
+  }
+
+  if (wartend) {
+    const restMin = Math.max(1, Math.ceil((wartend.freiAbMs - nowMs) / 60000));
+    const anteilPct = benoetigtMs > 0
+      ? Math.max(0, Math.min(100, Math.round(((nowMs - wartend.startMs) / benoetigtMs) * 100)))
+      : 0;
+    return {
+      bereit: false, faehrt60, anteilPct,
+      freiAb: new Date(wartend.freiAbMs).toISOString(),
+      naechsteShift: info(wartend.shift),
+      grund: `Shift „${wartend.shift.name}" läuft seit ${wartend.shift.startTime}. `
+        + `Freigabe bei 60 % der Fahrzeit (${fmtMin(fahrMin * 0.6)}) – noch ${restMin} Min.`,
+    };
+  }
+
+  const next = userShifts[0];
+  const startMs = next.startTime ? new Date(next.date + "T" + next.startTime).getTime() : NaN;
+  return {
+    bereit: false, faehrt60, anteilPct: 0,
+    freiAb: Number.isNaN(startMs) ? null : new Date(startMs + benoetigtMs).toISOString(),
+    naechsteShift: info(next),
+    grund: `Deine nächste Shift „${next.name}" startet am ${next.date} um ${next.startTime || "?"}. `
+      + "Vor dem Shiftbeginn gibt es keine Activity-Freigabe.",
+  };
+}
+
 app.get("/api/activity/me", requireAuth, (req, res) => {
   const data = db.load();
   const fromDateStr = zeitraumFrom(req.query.zeitraum);
@@ -2222,7 +2439,8 @@ app.get("/api/activity/me", requireAuth, (req, res) => {
   const signups = data.activity
     .filter((a) => a.userId === req.user.id && (!fromDateStr || (a.createdAt || "").slice(0, 10) >= fromDateStr))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  res.json({ ...me, signups, from: fromDateStr });
+  const bereit = activityBereitschaft(data, req.user, me.fahrMin || 0);
+  res.json({ ...me, signups, from: fromDateStr, bereit });
 });
 
 app.post("/api/activity/signup", requireAuth, (req, res) => {
@@ -2231,59 +2449,14 @@ app.post("/api/activity/signup", requireAuth, (req, res) => {
   const user = req.user;
   const proUser = fahrZeitData();
   const me = proUser[user.id];
-  
-  // Find user's active/upcoming shift to check shift start time
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const userShifts = data.shifts.filter((s) => {
-    if (!s.date || s.cancelled) return false;
-    const assignedDuty = data.duties.find((d) => d.shiftId === s.id && d.assignedUserId === user.id);
-    return assignedDuty && s.date >= today;
-  }).sort((a, b) => (a.date + " " + (a.startTime || "")).localeCompare(b.date + " " + (b.startTime || "")));
-  
   if (!me) {
     return res.status(400).json({ error: "Keine Fahrzeitdaten verfügbar" });
   }
-  
-  const fahrMin = me.fahrMin || 0;
-  const fahrMin60 = Math.round(fahrMin * 0.6);
-  
-  // Check if any shift has started and 60% of driving time has elapsed
-  let canSignup = false;
-  let errorMsg = "";
-  
-  for (const shift of userShifts) {
-    if (!shift.date || !shift.startTime) continue;
-    const shiftStart = new Date(shift.date + "T" + shift.startTime);
-    const shiftStartMs = shiftStart.getTime();
-    const nowMs = now.getTime();
-    
-    if (nowMs < shiftStartMs) {
-      // Shift hasn't started yet
-      continue;
-    }
-    
-    // Shift has started - check if 60% of driving time has elapsed
-    const fahrMinMs = (me.fahrMin || 0) * 60 * 1000;
-    const thresholdMs = shiftStartMs + Math.round(fahrMinMs * 0.6);
-    
-    if (nowMs >= thresholdMs) {
-      canSignup = true;
-      break;
-    } else {
-      const waitMs = thresholdMs - nowMs;
-      const waitMin = Math.ceil(waitMs / 60000);
-      errorMsg = `Shift hat begonnen, aber 60% der Fahrzeit (${fmtMin(Math.round((me.fahrMin || 0) * 0.6))}) noch nicht erreicht. Noch ${waitMin} Min warten.`;
-    }
+  const check = activityBereitschaft(data, user, me.fahrMin || 0);
+  if (!check.bereit) {
+    return res.status(400).json({ error: check.grund || "Aktuell keine Activity-Anmeldung möglich." });
   }
-  
-  if (!canSignup) {
-    if (!errorMsg) {
-      errorMsg = "Keine aktive/bevorstehende Shift gefunden oder Shift noch nicht gestartet.";
-    }
-    return res.status(400).json({ error: errorMsg });
-  }
-  
+
   data.activity.push({
     id: uid(), userId: user.id,
     von: von || new Date().toISOString().slice(0, 16),

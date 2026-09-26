@@ -105,6 +105,11 @@ Wichtigste Environment-Variablen:
 - `JWT_SECRET` – langes, geheimes Zufallspasswort
 - `DATA_FILE` – optional, z.B. `/var/data/data.json`
 - `SEED_FILE` – `seed/duties.json` (Tagesplan automatisch einspielen)
+- `DISCORD_WEBHOOK_URL` – optional, Discord-Webhook für das Login-Log (Erfolg **und**
+  Fehlversuche werden als Embed in den Channel gepostet). Mehrere Webhooks durch
+  Komma getrennt. **Niemals ins Frontend (`public/`) schreiben** – die URL ist ein
+  Geheimnis und würde sonst im Klartext an jeden Besucher ausgeliefert.
+  Fehlversuche sind pro Benutzer+IP auf 1 Meldung / 5 Minuten gedrosselt.
 
 ### 2. GitHub Pages (Frontend)
 

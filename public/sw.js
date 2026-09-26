@@ -19,6 +19,8 @@ self.addEventListener("push", (event) => {
     url: data.url || "/",
     tag: data.tag || "vbg",
     renotify: data.renotify === true,
+    icon: "icon-192.png",
+    badge: "icon-32.png",
     data: { url: data.url || "/" },
   };
   event.waitUntil(

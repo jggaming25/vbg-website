@@ -21,3 +21,9 @@ services:
         value: "20"
       - key: SEED_FILE
         value: seed/duties.json
+      # Discord-Login-Log: Wert NICHT hier eintragen (wäre im Repo im Klartext).
+      # Stattdessen manuell im Render-Dashboard setzen:
+      #   Render -> vbg-website -> Environment -> DISCORD_WEBHOOK_URL
+      #   = https://discord.com/api/webhooks/<ID>/<TOKEN>
+      # - key: DISCORD_WEBHOOK_URL
+      #   sync: false

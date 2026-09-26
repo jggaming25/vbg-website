@@ -5,7 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VBG Website</title>
   <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
   <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Logo-Fallback, falls logo.png fehlt: Kopfzeile bleibt aufrecht */
+    .brand-logo { display:block; height:34px; width:auto; }
+  </style>
 </head>
 <body>
   <div id="app"></div>
