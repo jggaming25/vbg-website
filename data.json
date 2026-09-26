@@ -23,7 +23,9 @@
       "protected": true,
       "createdAt": "2026-09-25T18:55:17.929Z",
       "strafFristBis": null,
-      "strafFristAuto": true
+      "strafFristAuto": true,
+      "mustChangePassword": false,
+      "license": ""
     }
   ],
   "linien": [
@@ -306,6 +308,36 @@
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": ""
+    },
+    {
+      "id": "disp-001",
+      "wagennummer": "Dispo",
+      "kennzeichen": "DISPO-01",
+      "typ": "VW Caddy",
+      "art": "Solo",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Dispositionsfahrzeug"
+    },
+    {
+      "id": "tiguan-001",
+      "wagennummer": "Tiguan_1",
+      "kennzeichen": "TIG-001",
+      "typ": "VW Tiguan",
+      "art": "SUV",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Einsatzleitung / Dispo"
+    },
+    {
+      "id": "tiguan-002",
+      "wagennummer": "Tiguan_2",
+      "kennzeichen": "TIG-002",
+      "typ": "VW Tiguan",
+      "art": "SUV",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof",
+      "bemerkung": "Einsatzleitung / Dispo"
     }
   ],
   "shifts": [
@@ -53360,5 +53392,8 @@
   "activity": [],
   "notifications": [],
   "announcements": [],
-  "announcementDate": null
+  "announcementDate": null,
+  "pushSubscriptions": [],
+  "fahrtenbuch": [],
+  "supervisorLog": []
 }
