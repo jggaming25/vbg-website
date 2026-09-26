@@ -148,7 +148,7 @@
       "wagennummer": "2005",
       "kennzeichen": "GV-VB 2005",
       "typ": "Bus",
-      "art": "Gelenk",
+      "art": "MAN NG313",
       "status": "nicht_einsatzbereit",
       "ort": "Betriebshof Neuenburg",
       "bemerkung": "Derzeitiger Display-Defekt"
@@ -64053,6 +64053,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2004",
       "createdAt": "2026-09-26T12:37:11.239Z"
+    },
+    {
+      "id": "d55e0fb5-611b-4b87-898c-3f69ce4155ea",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "2005",
+      "createdAt": "2026-09-26T12:37:22.484Z"
     }
   ],
   "_vapid": {
