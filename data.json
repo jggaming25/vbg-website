@@ -63398,7 +63398,20 @@
     }
   ],
   "wishes": [],
-  "applications": [],
+  "applications": [
+    {
+      "id": "cb40f816-c8a0-47ca-b74b-9602b2e219d4",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "von": "18:00",
+      "bis": "19:00",
+      "art": "kundenservice",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "hinweis": "",
+      "status": "pending",
+      "createdAt": "2026-09-26T22:18:43.217Z"
+    }
+  ],
   "kundenservice": [
     {
       "id": "4c8db131-e293-47a3-a91e-c21d46b76026",
@@ -63609,6 +63622,38 @@
       "type": "success",
       "read": true,
       "createdAt": "2026-09-26T21:58:22.930Z"
+    },
+    {
+      "id": "7dc801ce-2db7-4d35-8586-32ea48df47cd",
+      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "message": "jggaming2518 meldet sich für \"Kundenservice\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T22:18:43.345Z"
+    },
+    {
+      "id": "b5b871e6-afac-41dd-add5-8b4bb0e701e3",
+      "userId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "message": "jggaming2518 meldet sich für \"Kundenservice\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T22:18:43.345Z"
+    },
+    {
+      "id": "51d86d61-5fc3-4aad-9541-93486e8e4ed1",
+      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "message": "jggaming2518 meldet sich für \"Kundenservice\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T22:18:43.345Z"
+    },
+    {
+      "id": "c33dad9e-1b1b-4fa5-aef3-650048c020ef",
+      "userId": "all-supervisors",
+      "message": "jggaming2518 meldet sich für \"Kundenservice\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T22:18:43.345Z"
     }
   ],
   "announcements": [
