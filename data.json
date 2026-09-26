@@ -63343,7 +63343,7 @@
       "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
       "message": "Neue Shift „V1.1 Staff Shift“ ist da – 10 Dutys automatisch übernommen.",
       "type": "info",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:20:07.793Z"
     },
     {
@@ -63351,7 +63351,7 @@
       "userId": "all-supervisors",
       "message": "Neue Shift „V1.1 Staff Shift“ ist da – 10 Dutys automatisch übernommen.",
       "type": "info",
-      "read": false,
+      "read": true,
       "createdAt": "2026-09-26T10:20:07.793Z"
     }
   ],
