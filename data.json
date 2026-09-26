@@ -158,7 +158,7 @@
       "wagennummer": "1101",
       "kennzeichen": "GV-VB 1101",
       "typ": "Bus",
-      "art": "Solo",
+      "art": "MAN A37",
       "status": "einsatzbereit",
       "ort": "Betriebshof Gravenberg",
       "bemerkung": "Reserve Bus"
@@ -64061,6 +64061,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2005",
       "createdAt": "2026-09-26T12:37:22.484Z"
+    },
+    {
+      "id": "8e125c06-0723-4538-9e83-3c62fa314098",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "1101",
+      "createdAt": "2026-09-26T12:37:33.881Z"
     }
   ],
   "_vapid": {
