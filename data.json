@@ -144,6 +144,16 @@
       "bemerkung": "Reserve Bus"
     },
     {
+      "id": "ab5eda2c-16d8-4f0a-a96d-ce8146d15436",
+      "wagennummer": "1404",
+      "kennzeichen": "GV-VB 1404",
+      "typ": "Mercedes-Benz C2Ü Solo",
+      "art": "Solo",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof Gravenberg",
+      "bemerkung": "Auch Fahrschulbus"
+    },
+    {
       "id": "d8c21c80-c9af-457e-946f-e99f046990f0",
       "wagennummer": "1102",
       "kennzeichen": "GV-VB 1102",
@@ -212,16 +222,6 @@
       "status": "nicht_einsatzbereit",
       "ort": "Betriebshof Neuenburg",
       "bemerkung": "Derzeitiger Display-Defekt"
-    },
-    {
-      "id": "ab5eda2c-16d8-4f0a-a96d-ce8146d15436",
-      "wagennummer": "1404",
-      "kennzeichen": "GV-VB 1404",
-      "typ": "Mercedes-Benz C2Ü Solo",
-      "art": "Solo",
-      "status": "einsatzbereit",
-      "ort": "Betriebshof Gravenberg",
-      "bemerkung": "Auch Fahrschulbus"
     },
     {
       "id": "e4db3bf4-5ac7-41de-889a-3eac90905d91",
@@ -63796,6 +63796,14 @@
       "action": "Fahrzeugliste sortiert",
       "detail": "2088 – 2003 – 1101 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 2004 – 1404 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2005 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
       "createdAt": "2026-09-26T11:49:54.685Z"
+    },
+    {
+      "id": "de937e96-197b-44f4-aab5-cf7950095e67",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 2004 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2005 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T11:49:59.920Z"
     }
   ],
   "_vapid": {
