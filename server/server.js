@@ -283,6 +283,27 @@ function effectiveVehicle(duty) {
   return t ? t.vehicleId : null;
 }
 
+// Standard-Bustypen, die eine Linie fest vorschreiben kann. Alles andere ist ein
+// frei definierter Typ ("Sonstige") und darf auf jede Linie gesetzt werden.
+const STANDARD_BUSTYPEN = ["Solo", "Gelenk"];
+
+// Prüft Fahrzeugtyp gegen Linien-Vorgabe. Liefert null bei OK, sonst ein Fehlerobjekt.
+function vehicleTypeMismatch(line, vehicle) {
+  if (!line || !line.requiredVehicleType) return null;
+  if (!vehicle || !vehicle.art) return null; // kein Typ gesetzt -> keine Prüfung
+  const istFrei = !STANDARD_BUSTYPEN.includes(vehicle.art);
+  if (istFrei) return null; // selbst definierter Typ -> passt auf jede Linie
+  if (vehicle.art !== line.requiredVehicleType) {
+    return {
+      error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
+      warning: true,
+      lineRequired: line.requiredVehicleType,
+      vehicleType: vehicle.art,
+    };
+  }
+  return null;
+}
+
 // Erstellzeitpunkt eines Nutzers – Grundlage daf��r, dass neu angelegte Konten
 // keine Benachrichtigungen/Ansagen aus der Vergangenheit zu sehen bekommen.
 function userSince(user) {
@@ -1157,6 +1178,7 @@ function tagesplanShift(data) {
 }
 
 // ---------- Dutys auf die Shift-Zeit zuschneiden ----------
+const pad2 = (n) => String(n).padStart(2, "0");
 function toMin(hhmm) {
   if (typeof hhmm !== "string" || !/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
   const p = hhmm.split(":");
@@ -1489,14 +1511,8 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
       const data2 = db.load();
       const line = data2.linien.find((l) => l.id === duty.linieId);
       const vehicle = data2.fahrzeuge.find((f) => f.id === vehicleId);
-      if (line && line.requiredVehicleType && vehicle && vehicle.art && vehicle.art !== line.requiredVehicleType) {
-        return res.status(400).json({ 
-          error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
-          warning: true,
-          lineRequired: line.requiredVehicleType,
-          vehicleType: vehicle.art
-        });
-      }
+      const mismatch = vehicleTypeMismatch(line, vehicle);
+      if (mismatch) return res.status(400).json(mismatch);
     }
   }
 
@@ -1603,14 +1619,8 @@ app.patch("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req,
     if (vehicleId && duty.linieId && !force) {
       const line = data.linien.find((l) => l.id === duty.linieId);
       const vehicle = data.fahrzeuge.find((f) => f.id === vehicleId);
-      if (line && line.requiredVehicleType && vehicle && vehicle.art && vehicle.art !== line.requiredVehicleType) {
-        return res.status(400).json({ 
-          error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
-          warning: true,
-          lineRequired: line.requiredVehicleType,
-          vehicleType: vehicle.art
-        });
-      }
+      const mismatch = vehicleTypeMismatch(line, vehicle);
+      if (mismatch) return res.status(400).json(mismatch);
     }
   }
   if (typeof bemerkung === "string") trip.bemerkung = bemerkung;
@@ -1931,13 +1941,233 @@ app.delete("/api/kundenservice/:id", requireAuth, requireSupervisor, (req, res) 
   const data = db.load();
   data.kundenservice = data.kundenservice.filter((k) => k.id !== req.params.id);
   data.applications.forEach((a) => { if (a.standortId === req.params.id) a.standortId = null; });
+  db.ksSlots = (data.ksSlots || []).filter((s) => s.standortId !== req.params.id);
   db.save();
   res.json({ ok: true });
 });
 
-// ---------- Activity (60 % reine Fahrzeit, ohne Pausen) ----------
+// ---------- Kundenservice: 30-Minuten-Slots + Abarbeitung ----------
 
-const pad2 = (n) => String(n).padStart(2, "0");
+const KS_SLOT_MIN = 30;
+
+function ksFromMin(min) {
+  const m = ((min % 1440) + 1440) % 1440;
+  return pad2(Math.floor(m / 60)) + ":" + pad2(m % 60);
+}
+
+// Erzeugt die 30-Min-Slots für einen Standort innerhalb einer Shift.
+// Berücksichtigt die Standort-Zeiten (startTime/endTime) und die Shiftgrenzen.
+function ksBuildSlots(standort, shift) {
+  const sStart = toMin(standort.startTime) || 0;
+  const sEnd = toMin(standort.endTime) || 24 * 60;
+  const shStart = shift ? toMin(shift.startTime) : null;
+  const shEnd = shift ? toMin(shift.endTime) : null;
+  let von = sStart;
+  let bis = sEnd;
+  if (shStart != null) von = Math.max(von, shStart);
+  if (shEnd != null) bis = Math.min(bis, shEnd);
+  if (bis <= von) return [];
+  // auf das 30-Minuten-Raster aufrunden
+  const start = Math.ceil(von / KS_SLOT_MIN) * KS_SLOT_MIN;
+  const slots = [];
+  for (let t = start; t + KS_SLOT_MIN <= bis; t += KS_SLOT_MIN) {
+    slots.push({ von: ksFromMin(t), bis: ksFromMin(t + KS_SLOT_MIN), min: KS_SLOT_MIN });
+  }
+  return slots;
+}
+
+// Slots eines Standorts holen (erzeugt sie bei Bedarf einmalig und speichert sie)
+function ksSlotsFor(data, standortId, shiftId) {
+  const standort = data.kundenservice.find((k) => k.id === standortId);
+  if (!standort) return [];
+  const shift = shiftId ? data.shifts.find((s) => s.id === shiftId) : null;
+  const key = shiftId || "ohne-shift";
+  const vorhanden = (data.ksSlots || []).filter((s) => s.standortId === standortId && s.shiftKey === key);
+  if (vorhanden.length) {
+    return vorhanden
+      .slice()
+      .sort((a, b) => a.von.localeCompare(b.von))
+      .map((s) => ({ ...s, standortName: standort.name }));
+  }
+  const gebaut = ksBuildSlots(standort, shift).map((s) => ({
+    id: uid(),
+    standortId,
+    standortName: standort.name,
+    shiftKey: key,
+    shiftId: shiftId || null,
+    von: s.von,
+    bis: s.bis,
+    min: s.min,
+    belegtVon: null, // applicationId
+  }));
+  data.ksSlots = (data.ksSlots || []).concat(gebaut);
+  return gebaut;
+}
+
+// Slot-Zuweisung eines Slots (nur Supervisor) + Zuteilungs-Konflikt prüfen
+app.post("/api/kundenservice/slots/:id/assign", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const slot = (data.ksSlots || []).find((s) => s.id === req.params.id);
+  if (!slot) return res.status(404).json({ error: "Slot nicht gefunden – bitte Slots neu laden" });
+  const applicationId = (req.body && req.body.applicationId) || null;
+  if (!applicationId) {
+    slot.belegtVon = null;
+    audit(data, req.user, "Kundenservice-Slot freigegeben", `${slot.standortName} ${slot.von}–${slot.bis}`);
+    db.save();
+    return res.json({ slot });
+  }
+  const app = data.applications.find((a) => a.id === applicationId);
+  if (!app) return res.status(404).json({ error: "Anmeldung nicht gefunden" });
+  if (app.art !== "kundenservice") return res.status(400).json({ error: "Anmeldung ist kein Kundenservice" });
+
+  // gleiche Anmeldung darf nicht doppelt verplant werden
+  const doppelt = (data.ksSlots || []).find((s) => s.belegtVon === applicationId && s.id !== slot.id);
+  if (doppelt) {
+    return res.status(400).json({
+      error: `Diese Anmeldung ist bereits auf ${doppelt.standortName} ${doppelt.von}–${doppelt.bis} eingeteilt.`,
+    });
+  }
+  // Fahrer-Zeitkonflikt gegen andere Slots
+  const userId = app.userId;
+  if (userId) {
+    const belegt = (data.ksSlots || []).find((s) => s.belegtVon === applicationId && s.id !== slot.id);
+    if (belegt) return res.status(400).json({ error: "Anmeldung ist bereits eingeteilt." });
+    // Zeitüberschneidung mit anderen Slots derselben Person (gleiche Shift-Tage)
+    const konflikt = (data.ksSlots || []).find((s) => {
+      if (s.id === slot.id || !s.belegtVon) return false;
+      const a2 = data.applications.find((x) => x.id === s.belegtVon);
+      if (!a2 || a2.userId !== userId) return false;
+      if ((a2.shiftId || "") !== (app.shiftId || "")) return false;
+      const s1 = toMin(slot.von), e1 = toMin(slot.bis);
+      const s2 = toMin(s.von), e2 = toMin(s.bis);
+      return s1 < e2 && s2 < e1;
+    });
+    if (konflikt) {
+      const a2 = data.applications.find((x) => x.id === konflikt.belegtVon);
+      const name2 = a2 ? (publicUser(data.users.find((u) => u.id === userId) || {}) || {}).username : "die Person";
+      return res.status(400).json({
+        error: `Zeitüberschneidung: ${name2} ist in diesem Shift schon ${konflikt.von}–${konflikt.bis} eingeteilt.`,
+      });
+    }
+  }
+
+  slot.belegtVon = applicationId;
+  slot.applicationId = applicationId;
+  // Anmeldung als zugeteilt markieren
+  app.ksSlotId = slot.id;
+  app.standortId = slot.standortId;
+  audit(data, req.user, "Kundenservice-Slot zugeteilt", `${slot.standortName} ${slot.von}–${slot.bis} → ${app.userId || "?"}`);
+  notify(app.userId, `Du wurdest für den Kundenservice "${slot.standortName}" in der Zeit ${slot.von}–${slot.bis} eingeteilt.`, "success");
+  db.save();
+  res.json({ slot, application: app });
+});
+
+// Slots + Anmeldungen für die Zuteilung laden
+app.get("/api/kundenservice/slots", requireAuth, (req, res) => {
+  const data = db.load();
+  const standortId = (req.query && req.query.standortId) || "";
+  const shiftId = (req.query && req.query.shiftId) || "";
+  if (!standortId) return res.status(400).json({ error: "standortId fehlt" });
+  const slots = ksSlotsFor(data, standortId, shiftId || null);
+  db.save(); // neu erzeugte Slots persistieren
+  // passende Kundenservice-Anmeldungen (offen oder bereits eingeplant)
+  const apps = (data.applications || [])
+    .filter((a) => a.art === "kundenservice")
+    .filter((a) => !shiftId || !a.shiftId || a.shiftId === shiftId)
+    .map((a) => enrichApplication(data, a));
+  res.json({ slots, applications: apps });
+});
+
+// Abarbeitete Zeit melden (nach der Shift) – noch ohne Genehmigung
+app.post("/api/kundenservice/arbeit", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const { slotId, applicationId, min, notiz } = req.body || {};
+  const slot = (data.ksSlots || []).find((s) => s.id === slotId);
+  if (!slot) return res.status(404).json({ error: "Slot nicht gefunden" });
+  const appId = applicationId || slot.belegtVon;
+  const app = data.applications.find((a) => a.id === appId);
+  if (!app) return res.status(400).json({ error: "Slot ist keiner Anmeldung zugeteilt" });
+  const user = data.users.find((u) => u.id === app.userId);
+  if (!user) return res.status(400).json({ error: "Nutzer nicht gefunden" });
+  const m = Number(min);
+  if (!Number.isFinite(m) || m <= 0) return res.status(400).json({ error: "Minuten fehlen" });
+
+  const schon = (data.ksArbeit || []).find((w) => w.slotId === slot.id);
+  if (schon) return res.status(400).json({ error: "Für diesen Slot wurde bereits eine Zeit eingetragen." });
+  const eintrag = {
+    id: uid(),
+    slotId: slot.id,
+    applicationId: app.id,
+    userId: user.id,
+    username: user.username,
+    standortId: slot.standortId,
+    standortName: slot.standortName,
+    shiftId: slot.shiftId || app.shiftId || null,
+    von: slot.von,
+    bis: slot.bis,
+    min: m,
+    notiz: (notiz || "").trim(),
+    status: "offen", // wartet auf Genehmigung durch den Shift Host
+    erstelltVon: req.user.username,
+    erstelltVonId: req.user.id,
+    erstelltAt: new Date().toISOString(),
+    genehmigtVon: null,
+    genehmigtAt: null,
+  };
+  data.ksArbeit.push(eintrag);
+  audit(data, req.user, "Kundenservice-Zeit eingetragen", `${user.username}: ${m} Min (${slot.standortName} ${slot.von}–${slot.bis})`);
+  db.save();
+  res.json({ arbeit: eintrag });
+});
+
+// Abarbeitete Zeiten auflisten (nur Supervisor sichtbar)
+app.get("/api/kundenservice/arbeit", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const status = (req.query && req.query.status) || "";
+  let items = (data.ksArbeit || []).slice();
+  if (status) items = items.filter((w) => w.status === status);
+  items.sort((a, b) => String(b.erstelltAt).localeCompare(String(a.erstelltAt)));
+  res.json({ items });
+});
+
+// Genehmigung durch den Shift Host -> zieht die Zeit vom Strafkonto ab
+app.post("/api/kundenservice/arbeit/:id/approve", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const w = (data.ksArbeit || []).find((x) => x.id === req.params.id);
+  if (!w) return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  if (w.status === "genehmigt") return res.status(400).json({ error: "Bereits genehmigt" });
+  if (w.status === "abgelehnt") return res.status(400).json({ error: "Bereits abgelehnt" });
+  const user = data.users.find((u) => u.id === w.userId);
+  if (!user) return res.status(404).json({ error: "Nutzer nicht gefunden" });
+
+  user.strafstunden = Number(user.strafstunden || 0) + w.min;
+  if (!w.strafstundenGrund) w.strafstundenGrund = "";
+  w.status = "genehmigt";
+  w.genehmigtVon = req.user.username;
+  w.genehmigtVonId = req.user.id;
+  w.genehmigtAt = new Date().toISOString();
+  audit(data, req.user, "Kundenservice-Zeit genehmigt", `${w.username}: +${w.min} Strafminuten (${w.standortName} ${w.von}–${w.bis})`);
+  notify(w.userId, `Deine Kundenservice-Zeit (${w.min} Min, ${w.standortName} ${w.von}–${w.bis}) wurde genehmigt und als Strafe verbucht.`, "warning");
+  db.save();
+  res.json({ arbeit: w, user: publicUser(user) });
+});
+
+app.post("/api/kundenservice/arbeit/:id/reject", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const w = (data.ksArbeit || []).find((x) => x.id === req.params.id);
+  if (!w) return res.status(404).json({ error: "Eintrag nicht gefunden" });
+  if (w.status !== "offen") return res.status(400).json({ error: "Bereits entschieden" });
+  w.status = "abgelehnt";
+  w.grund = ((req.body && req.body.grund) || "").trim();
+  w.genehmigtVon = req.user.username;
+  w.genehmigtVonId = req.user.id;
+  w.genehmigtAt = new Date().toISOString();
+  audit(data, req.user, "Kundenservice-Zeit abgelehnt", `${w.username}: ${w.min} Min (${w.grund || "ohne Grund"})`);
+  db.save();
+  res.json({ arbeit: w });
+});
+
+// ---------- Activity (60 % reine Fahrzeit, ohne Pausen) ----------
 
 // Startdatum (YYYY-MM-DD) des gewählten Zeitraums; monat = Anfang des aktuellen Kalendermonats
 function zeitraumFrom(zeitraum) {

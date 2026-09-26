@@ -33,6 +33,8 @@ function emptyStore() {
     wishes: [],
     applications: [], // Shift-/Kundenservice-Anmeldungen (von-bis)
     kundenservice: [], // Standorte des Kundenservice-Blocks
+    ksSlots: [], // 30-Min-Slots je Standort+Shift (Kundenservice-Zuteilung)
+    ksArbeit: [], // abgearbeitete Zeiten – Genehmigung durch Shift Host zieht Strafen
     activity: [], // Activity-Anmeldungen
     notifications: [],
     announcements: [], // Broadcast-Nachrichten (Supervisor → Zielgruppen)
@@ -151,6 +153,8 @@ function shapeAndMigrate(db) {
   if (!db.wishes) db.wishes = [];
   if (!db.applications) db.applications = [];
   if (!db.kundenservice) db.kundenservice = [];
+  if (!db.ksSlots) db.ksSlots = [];
+  if (!db.ksArbeit) db.ksArbeit = [];
   if (!db.activity) db.activity = [];
   if (!db.notifications) db.notifications = [];
   if (!db.announcements) db.announcements = [];
@@ -353,6 +357,8 @@ async function pushRemoteDb() {
   if (!db.applications) db.applications = [];
   if (!db.wishes) db.wishes = [];
   if (!db.kundenservice) db.kundenservice = [];
+  if (!db.ksSlots) db.ksSlots = [];
+  if (!db.ksArbeit) db.ksArbeit = [];
   if (!db.fahrtenbuch) db.fahrtenbuch = [];
   if (!db.supervisorLog) db.supervisorLog = [];
   const content = JSON.stringify(db, null, 2);

@@ -213,6 +213,40 @@
     fahrschule: { label: "Fahrschule", cls: "violet" },
     reserve: { label: "Reserve", cls: "gray" },
   };
+  // Bustyp (Fahrzeug.art) – steuert die Linien-Prüfung (19/8 = Solo, 24/N1 = Gelenk).
+  // "Sonstige" erlaubt eine frei eingebbare Bezeichnung.
+  const BUSTYP_SONSTIGE = "__sonstige__";
+  const BUSTYP_OPTIONS = ["Solo", "Gelenk", BUSTYP_SONSTIGE];
+  const bustypLabel = (art) => (art ? String(art) : "–");
+  // HTML für Bustyp-Auswahl + bedingtes Freitextfeld
+  function bustypField(prefix, current) {
+    const cur = current || "";
+    const isSonstige = cur && !["Solo", "Gelenk"].includes(cur);
+    const opts = ["Solo", "Gelenk"].map((o) =>
+      `<option value="${o}" ${cur === o ? "selected" : ""}>${o}</option>`).join("");
+    return `
+      <label>Bustyp<select id="${prefix}-art" onchange="VBG.toggleBustypFrei('${prefix}')">
+        ${opts}
+        <option value="${BUSTYP_SONSTIGE}" ${isSonstige ? "selected" : ""}>Sonstige…</option>
+      </select></label>
+      <label id="${prefix}-art-frei-wrap" style="${isSonstige ? "" : "display:none"}">Bustyp selbst eintragen
+        <input id="${prefix}-art-frei" value="${isSonstige ? h(cur) : ""}" placeholder="z. B. Reisebus, Kleinbus"/>
+      </label>`;
+  }
+  // Wert des Bustyp-Feldes auslesen (Auswahl + ggf. Freitext)
+  function readBustyp(prefix) {
+    const sel = document.getElementById(prefix + "-art");
+    if (!sel) return "";
+    if (sel.value !== BUSTYP_SONSTIGE) return sel.value;
+    const frei = document.getElementById(prefix + "-art-frei");
+    return frei ? frei.value.trim() : "";
+  }
+  function toggleBustypFrei(prefix) {
+    const sel = document.getElementById(prefix + "-art");
+    const wrap = document.getElementById(prefix + "-art-frei-wrap");
+    if (!sel || !wrap) return;
+    wrap.style.display = sel.value === BUSTYP_SONSTIGE ? "" : "none";
+  }
 
   // ---------- State ----------
   const state = {
@@ -1420,6 +1454,7 @@ function superProtokollView() {
           <div class="form-grid" style="margin-bottom:16px">
             <label>Wagennummer<input id="fz-wagennummer" placeholder="z. B. 123"/></label>
             <label>Kennzeichen<input id="fz-kennzeichen" placeholder="z. B. B-VB 1234"/></label>
+            ${bustypField("fz", "")}
             <label>Typ<select id="fz-typ">
               <option value="Bus">Bus</option>
               <option value="Sonderfahrzeug">Sonderfahrzeug</option>
@@ -1446,7 +1481,7 @@ function superProtokollView() {
         <table id="fzTable">
           <thead><tr>
             ${canEdit ? `<th style="width:34px"></th>` : ""}
-            <th>Wagennummer</th><th>Kennzeichen</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
+            <th>Wagennummer</th><th>Kennzeichen</th><th>Bustyp</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
             ${canEdit ? `<th>Aktionen</th>` : ""}
           </tr></thead>
           <tbody id="fzBody">
@@ -1455,6 +1490,7 @@ function superProtokollView() {
                 ${canEdit ? `<td class="fz-drag" title="Zum Verschieben ziehen">⠿</td>` : ""}
                 <td>${h(f.wagennummer || "–")}</td>
                 <td>${h(f.kennzeichen || "–")}</td>
+                <td>${f.art ? `<span class="badge ${f.art === "Solo" ? "sky" : f.art === "Gelenk" ? "violet" : "yellow"}">${h(bustypLabel(f.art))}</span>` : `<span class="muted">–</span>`}</td>
                 <td>${h(f.typ || "–")}</td>
                 <td><span class="badge ${(VEHICLE_STATUS[f.status] || {}).cls || "gray"}">${h((VEHICLE_STATUS[f.status] || {}).label || f.status)}</span></td>
                 <td>${h(f.ort || "–")}</td>
@@ -1464,7 +1500,7 @@ function superProtokollView() {
                   <button class="btn btn-danger btn-xs" onclick="VBG.deleteFahrzeug('${f.id}')">Löschen</button>
                 </td>` : ""}
               </tr>
-            `).join("") : `<tr><td colspan="${canEdit ? 8 : 7}" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
+            `).join("") : `<tr><td colspan="${canEdit ? 9 : 8}" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1539,9 +1575,14 @@ function superProtokollView() {
   }
 
   function createFahrzeug() {
+    const art = readBustyp("fz");
+    if (document.getElementById("fz-art").value === BUSTYP_SONSTIGE && !art) {
+      toast("Bustyp selbst eintragen (z. B. Reisebus)", "err"); return;
+    }
     const body = {
       wagennummer: document.getElementById("fz-wagennummer").value.trim(),
       kennzeichen: document.getElementById("fz-kennzeichen").value.trim(),
+      art,
       typ: document.getElementById("fz-typ").value,
       status: document.getElementById("fz-status").value,
       ort: document.getElementById("fz-ort").value.trim(),
@@ -1566,6 +1607,7 @@ function superProtokollView() {
         <div class="form-grid">
           <label>Wagennummer<input id="${editId}-wagennummer" value="${h(f.wagennummer)}"/></label>
           <label>Kennzeichen<input id="${editId}-kennzeichen" value="${h(f.kennzeichen)}"/></label>
+          ${bustypField(editId, f.art || "")}
           <label>Typ<select id="${editId}-typ">
             <option value="Bus" ${f.typ === "Bus" ? "selected" : ""}>Bus</option>
             <option value="Sonderfahrzeug" ${f.typ === "Sonderfahrzeug" ? "selected" : ""}>Sonderfahrzeug</option>
@@ -1593,9 +1635,14 @@ function superProtokollView() {
   }
 
   async function saveFahrzeug(id, editId) {
+    const art = readBustyp(editId);
+    if (document.getElementById(editId + "-art").value === BUSTYP_SONSTIGE && !art) {
+      toast("Bustyp selbst eintragen (z. B. Reisebus)", "err"); return;
+    }
     const body = {
       wagennummer: document.getElementById(editId + "-wagennummer").value.trim(),
       kennzeichen: document.getElementById(editId + "-kennzeichen").value.trim(),
+      art,
       typ: document.getElementById(editId + "-typ").value,
       status: document.getElementById(editId + "-status").value,
       ort: document.getElementById(editId + "-ort").value.trim(),
@@ -1627,6 +1674,7 @@ function superProtokollView() {
       { id: "users", label: "Nutzer" },
       { id: "linien", label: "Lizenzen & Linien" },
       { id: "anmeldungen", label: "Anmeldungen" },
+      { id: "kundenservice", label: "Kundenservice" },
       { id: "activity", label: "Activity" },
       { id: "protokoll", label: "Protokoll" },
       { id: "backup", label: "Backup" },
@@ -1636,10 +1684,174 @@ function superProtokollView() {
     if (state.superTab === "users") body = superUsersView();
     else if (state.superTab === "linien") body = superLinienView();
     else if (state.superTab === "anmeldungen") body = superAnmeldungenView();
+    else if (state.superTab === "kundenservice") body = superKundenserviceView();
     else if (state.superTab === "activity") body = activityAllView();
     else if (state.superTab === "protokoll") body = superProtokollView();
     else if (state.superTab === "backup") body = superBackupView();
     return `<h2>Supervisor</h2>${tabHtml}${body}`;
+  }
+
+  // ---------- Supervisor: Kundenservice (Slots + Abarbeitung) ----------
+  const KS_STATE = { standortId: "", shiftId: "", slots: null, applications: [], arbeit: null, sub: "slots" };
+
+  async function loadKsSlots() {
+    if (!KS_STATE.standortId) { KS_STATE.slots = null; return; }
+    try {
+      const q = "?standortId=" + encodeURIComponent(KS_STATE.standortId) +
+        (KS_STATE.shiftId ? "&shiftId=" + encodeURIComponent(KS_STATE.shiftId) : "");
+      const r = await api("GET", "/api/kundenservice/slots" + q);
+      KS_STATE.slots = r.slots || [];
+      KS_STATE.applications = r.applications || [];
+    } catch (e) { KS_STATE.slots = null; toast(e.message, "err"); }
+  }
+  async function loadKsArbeit() {
+    try { const r = await api("GET", "/api/kundenservice/arbeit"); KS_STATE.arbeit = r.items || []; }
+    catch (e) { KS_STATE.arbeit = []; }
+  }
+
+  function superKundenserviceView() {
+    const standorte = KUNDENSERVICE_STATE.items || [];
+    const subTabs = `<div class="tabs" style="margin:0 0 12px">
+        <button class="tab ${KS_STATE.sub === "slots" ? "active" : ""}" onclick="VBG.setKsSub('slots')">Slot-Zuteilung</button>
+        <button class="tab ${KS_STATE.sub === "arbeit" ? "active" : ""}" onclick="VBG.setKsSub('arbeit')">Abarbeitete Zeiten</button>
+      </div>`;
+    if (!standorte.length) {
+      return `<h2>Supervisor – Kundenservice</h2>${subTabs}
+        <div class="container"><p class="muted">Noch kein Kundenservice-Standort angelegt.</p></div>`;
+    }
+    const standortOpts = standorte.map((k) =>
+      `<option value="${k.id}" ${KS_STATE.standortId === k.id ? "selected" : ""}>${h(k.name)}</option>`).join("");
+    const kopf = `
+      <div class="container">
+        <div class="form-grid">
+          <label>Standort<select onchange="VBG.setKsStandort(this.value)">
+            <option value="">— wählen —</option>${standortOpts}
+          </select></label>
+          <label>Shift<select onchange="VBG.setKsShift(this.value)">
+            <option value="">— alle —</option>
+            ${realShifts().map((s) => `<option value="${s.id}" ${KS_STATE.shiftId === s.id ? "selected" : ""}>${h(s.name)}${s.date ? " (" + h(s.date) + ")" : ""}</option>`).join("")}
+          </select></label>
+        </div>
+      </div>`;
+    return `<h2>Supervisor – Kundenservice</h2>${subTabs}${kopf}` +
+      (KS_STATE.sub === "slots" ? ksSlotsView() : ksArbeitView());
+  }
+
+  function ksSlotsView() {
+    if (!KS_STATE.standortId) return `<div class="container"><p class="muted">Bitte einen Standort wählen.</p></div>`;
+    if (!KS_STATE.slots) return `<div class="container"><div class="spinner">Lade Slots…</div></div>`;
+    const slots = KS_STATE.slots;
+    if (!slots.length) return `<div class="container"><p class="muted">Für diesen Standort/Shift gibt es keine 30-Minuten-Slots.</p></div>`;
+    const apps = KS_STATE.applications || [];
+    const appById = new Map(apps.map((a) => [a.id, a]));
+
+    const zellen = slots.map((s) => {
+      const app = s.belegtVon ? appById.get(s.belegtVon) : null;
+      const opt = `<option value="" ${!s.belegtVon ? "selected" : ""}>— frei —</option>` +
+        apps.map((a) => `<option value="${a.id}" ${s.belegtVon === a.id ? "selected" : ""}>${h(a.username)}${a.von ? " (" + h(a.von) + "–" + h(a.bis) + ")" : ""}</option>`).join("");
+      return `
+        <tr>
+          <td><b>${h(s.von)}–${h(s.bis)}</b></td>
+          <td style="max-width:240px">
+            <select onchange="VBG.assignKsSlot('${s.id}', this.value)" style="width:100%">${opt}</select>
+            ${app && app.ksSlotId !== s.id ? `<span class="muted" style="font-size:11px">Warnung: anderswo eingeteilt</span>` : ""}
+          </td>
+          <td>
+            ${s.belegtVon ? `<button class="btn btn-xs" onclick="VBG.ksZeitEintragen('${s.id}')">Zeit eintragen</button>` : `<span class="muted">–</span>`}
+          </td>
+        </tr>`;
+    }).join("");
+
+    return `
+      <div class="container">
+        <p class="muted" style="margin:0 0 10px">Slots à 30 Minuten. Anmeldungen manuell zuordnen; pro Person keine Überschneidung.</p>
+        <table>
+          <thead><tr><th style="width:130px">Zeit</th><th>Anmeldung</th><th style="width:150px">Abarbeitung</th></tr></thead>
+          <tbody>${zellen}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function ksArbeitView() {
+    if (KS_STATE.arbeit === null) return `<div class="container"><div class="spinner">Lade…</div></div>`;
+    const items = KS_STATE.arbeit || [];
+    if (!items.length) return `<div class="container"><p class="muted">Noch keine abgearbeiteten Zeiten erfasst.</p></div>`;
+    const badge = (st) => st === "genehmigt"
+      ? `<span class="badge green">genehmigt</span>`
+      : st === "abgelehnt" ? `<span class="badge red">abgelehnt</span>`
+      : `<span class="badge yellow">wartet auf Genehmigung</span>`;
+    const zeilen = items.map((w) => `
+      <tr>
+        <td><b>${h(w.username)}</b></td>
+        <td>${h(w.standortName || "–")}</td>
+        <td>${h(w.von)}–${h(w.bis)}</td>
+        <td><b>${w.min}</b> Min</td>
+        <td>${w.notiz ? h(w.notiz) : `<span class="muted">–</span>`}</td>
+        <td>${badge(w.status)}</td>
+        <td>${w.genehmigtVon ? h(w.genehmigtVon) + " · " + h(String(w.genehmigtAt || "").slice(0, 16).replace("T", " ")) : `<span class="muted">–</span>`}</td>
+        <td>${w.status === "offen" ? `
+          <button class="btn btn-green btn-xs" onclick="VBG.ksApprove('${w.id}')" title="Genehmigen – Zeit wird als Strafe verbucht">Genehmigen</button>
+          <button class="btn btn-danger btn-xs" onclick="VBG.ksReject('${w.id}')">Ablehnen</button>
+        ` : ""}</td>
+      </tr>`).join("");
+    return `
+      <div class="container">
+        <p class="muted" style="margin:0 0 10px">Nur für Supervisor sichtbar. Erst nach der Shift eintragen – die Genehmigung durch den Shift Host zieht die Zeit automatisch vom Strafkonto ab.</p>
+        <table>
+          <thead><tr><th>Fahrer</th><th>Standort</th><th>Zeit</th><th>Dauer</th><th>Notiz</th><th>Status</th><th>Entscheidung</th><th></th></tr></thead>
+          <tbody>${zeilen}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function setKsSub(sub) { KS_STATE.sub = sub; if (sub === "arbeit") loadKsArbeit().then(render); else render(); }
+  function setKsStandort(id) { KS_STATE.standortId = id; KS_STATE.slots = null; loadKsSlots().then(render); }
+  function setKsShift(id) { KS_STATE.shiftId = id; KS_STATE.slots = null; loadKsSlots().then(render); }
+
+  async function assignKsSlot(slotId, applicationId) {
+    try {
+      await api("POST", "/api/kundenservice/slots/" + slotId + "/assign", {
+        applicationId: applicationId || null,
+      });
+      toast("Zuordnung gespeichert", "ok");
+      await loadKsSlots();
+      render();
+    } catch (e) { toast(e.message, "err"); await loadKsSlots(); render(); }
+  }
+
+  function ksZeitEintragen(slotId) {
+    const slot = (KS_STATE.slots || []).find((s) => s.id === slotId);
+    if (!slot) return;
+    const v = prompt(`Abarbeitete Zeit für ${slot.standortName} (${slot.von}–${slot.bis}) eintragen.\nWie viele Minuten wurden gearbeitet?`, String(slot.min || 30));
+    if (v === null) return;
+    const min = Number(String(v).replace(",", "."));
+    if (!Number.isFinite(min) || min <= 0) { toast("Bitte eine gültige Minutenzahl eingeben", "err"); return; }
+    const notiz = prompt("Notiz (optional)") || "";
+    api("POST", "/api/kundenservice/arbeit", { slotId, min, notiz })
+      .then(() => { toast("Zeit eingetragen – wartet auf Genehmigung", "ok"); return loadKsArbeit(); })
+      .then(render)
+      .catch((e) => toast(e.message, "err"));
+  }
+
+  async function ksApprove(id) {
+    if (!confirm("Genehmigen? Die Zeit wird dem Strafkonto der Person gutgeschrieben.")) return;
+    try {
+      await api("POST", "/api/kundenservice/arbeit/" + id + "/approve", {});
+      toast("Genehmigt – Strafkonto aktualisiert", "ok");
+      await loadKsArbeit();
+      await loadUsers();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function ksReject(id) {
+    const grund = prompt("Ablehnen – Grund (optional)") || "";
+    try {
+      await api("POST", "/api/kundenservice/arbeit/" + id + "/reject", { grund });
+      toast("Abgelehnt", "ok");
+      await loadKsArbeit();
+      render();
+    } catch (e) { toast(e.message, "err"); }
   }
 
   function superUsersView() {
@@ -2272,6 +2484,17 @@ function superProtokollView() {
     state.superTab = tab;
     if (tab === "users") { loadUsers().then(() => render()); return; }
     if (tab === "anmeldungen") { loadAppsAll().then(() => render()); return; }
+    if (tab === "kundenservice") {
+      render();
+      const t = (async () => {
+        await loadKundenservice();
+        if (!KS_STATE.standortId) KS_STATE.standortId = defaultStandortId();
+        await loadKsSlots();
+        if (KS_STATE.sub === "arbeit") await loadKsArbeit();
+      })();
+      t.then(render);
+      return;
+    }
     if (tab === "activity") { state.actAll = null; loadActivityAll().then((r) => { state.actAll = r; render(); }); return; }
     if (tab === "protokoll") { loadSuperLog().then(() => render()); return; }
     if (tab === "backup") { render(); return; }
@@ -3118,6 +3341,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       if (state.view === "supervisor" && state.superTab === "anmeldungen") await loadAppsAll();
       if (state.view === "fahrtenbuch") await loadFahrtenbuch();
       if (state.view === "supervisor" && state.superTab === "protokoll") await loadSuperLog();
+      if (state.view === "supervisor" && state.superTab === "kundenservice" && KS_STATE.sub === "arbeit") await loadKsArbeit();
     }, 60000);
     // Notification polling (10s) - for real-time notifications
     notifPollTimer = setInterval(async () => {
@@ -3221,6 +3445,8 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
+    toggleBustypFrei,
+    setKsSub, setKsStandort, setKsShift, assignKsSlot, ksZeitEintragen, ksApprove, ksReject,
     loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug, backupNow,
     forceAssignDutyVehicle, forceAssignTripVehicle,
   };
