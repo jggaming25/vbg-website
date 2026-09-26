@@ -63398,7 +63398,20 @@
     }
   ],
   "wishes": [],
-  "applications": [],
+  "applications": [
+    {
+      "id": "f5b2c431-8dc5-4f30-a8b3-d5d2df19ea1e",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "von": "18:00",
+      "bis": "21:00",
+      "art": "bus",
+      "standortId": null,
+      "hinweis": "Ich will 2503 und Linie19",
+      "status": "pending",
+      "createdAt": "2026-09-26T13:23:27.481Z"
+    }
+  ],
   "kundenservice": [
     {
       "id": "4c8db131-e293-47a3-a91e-c21d46b76026",
@@ -63529,6 +63542,38 @@
       "type": "success",
       "read": false,
       "createdAt": "2026-09-26T12:16:54.541Z"
+    },
+    {
+      "id": "f971b501-f2cd-49ab-b286-2e92371d9ece",
+      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "message": "Lkw448 meldet sich für \"Busfahren\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T13:23:27.636Z"
+    },
+    {
+      "id": "2a441d92-a312-4969-82fa-ed8405a6a1ce",
+      "userId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "message": "Lkw448 meldet sich für \"Busfahren\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T13:23:27.636Z"
+    },
+    {
+      "id": "76062257-c429-48dc-bb7e-bd6326b4d0cc",
+      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "message": "Lkw448 meldet sich für \"Busfahren\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T13:23:27.636Z"
+    },
+    {
+      "id": "e7917bf7-7bde-4c69-a602-eda7c0f02eae",
+      "userId": "all-supervisors",
+      "message": "Lkw448 meldet sich für \"Busfahren\" an.",
+      "type": "apply",
+      "read": false,
+      "createdAt": "2026-09-26T13:23:27.636Z"
     }
   ],
   "announcements": [
