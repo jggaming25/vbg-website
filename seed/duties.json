@@ -32,7 +32,7 @@
     {
       "id": "lin24",
       "name": "(SB) 24",
-      "label": "Linie 24 (Schnellbus)",
+      "label": "Gelenk",
       "requiredVehicleType": "Gelenk",
       "requiredLicense": "Gelenk"
     },

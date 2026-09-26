@@ -574,6 +574,16 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
 
 app.post("/api/auth/logout", (req, res) => res.json({ ok: true }));
 
+// Manueller Daten-Backup (nur Supervisor)
+app.post("/api/backup/manual", requireAuth, requireSupervisor, async (req, res) => {
+  const result = await db.pushRemoteDb();
+  if (result.ok) {
+    res.json({ ok: true, message: "Backup erfolgreich in data-Branch gespeichert" });
+  } else {
+    res.status(500).json({ ok: false, error: result.error });
+  }
+});
+
 // ---------- Nutzer ----------
 
 app.get("/api/users", requireAuth, requireSupervisor, (req, res) => {

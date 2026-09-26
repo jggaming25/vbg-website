@@ -343,6 +343,41 @@ async function doCommit(content, h) {
   lastCommitHash = h;
 }
 
+async function pushRemoteDb() {
+  const token = process.env.VBG_GITHUB_TOKEN;
+  if (!token) return { ok: false, error: "VBG_GITHUB_TOKEN nicht gesetzt" };
+  const content = JSON.stringify(db, null, 2);
+  const h = contentHash(content);
+  try {
+    const base = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/data.json`;
+    const headers = ghHeaders(token);
+    const getRes = await fetch(base + "?ref=" + GH_DATA_BRANCH, { headers });
+    let sha = null;
+    if (getRes.ok) {
+      const meta = await getRes.json();
+      sha = meta.sha;
+    }
+    const putRes = await fetch(base, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch: GH_DATA_BRANCH,
+        message: "Manueller Backup " + new Date().toISOString(),
+        content: Buffer.from(content, "utf8").toString("base64"),
+        ...(sha ? { sha } : {}),
+      }),
+    });
+    if (!putRes.ok) {
+      const err = await putRes.text();
+      throw new Error("Push fehlgeschlagen: " + putRes.status + " " + err);
+    }
+    lastCommitHash = contentHash(content);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // Importiert den wiederverwendbaren Tagesplan aus seed/duties.json.
 // - Linien: idempotent anhand Name.
 // - Fahrzeuge: idempotent anhand Wagennummer.
@@ -423,5 +458,6 @@ module.exports = {
   DEFAULT_LINIEN,
   remoteDbEnabled,
   fetchRemoteDb,
+  pushRemoteDb,
   applyRemoteDb,
 };

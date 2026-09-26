@@ -307,6 +307,35 @@
     catch (e) { state.superLog = []; }
   }
 
+  async function backupNow() {
+    const btn = document.getElementById("backup-btn");
+    const btnText = document.getElementById("backup-btn-text");
+    const spinner = document.getElementById("backup-spinner");
+    const status = document.getElementById("backup-status");
+    if (!btn) return;
+    btn.disabled = true;
+    btnText.textContent = "⏳ Speichere...";
+    spinner.style.display = "inline-block";
+    status.textContent = "";
+    try {
+      const res = await api("POST", "/api/backup/manual");
+      if (res.ok) {
+        status.textContent = "✅ " + (res.message || "Backup erfolgreich");
+        status.style.color = "var(--green)";
+      } else {
+        status.textContent = "❌ " + (res.error || "Fehler");
+        status.style.color = "var(--red)";
+      }
+    } catch (e) {
+      status.textContent = "❌ " + e.message;
+      status.style.color = "var(--red)";
+    } finally {
+      btn.disabled = false;
+      btnText.textContent = "💾 Backup jetzt speichern";
+      spinner.style.display = "none";
+    }
+  }
+
   function refreshAll() {
     return Promise.all([loadCats(), loadShifts(), loadMyApps()]);
   }
@@ -534,7 +563,7 @@
           </div>
         </div>
         <div class="carousel-controls" style="display:flex;justify-content:center;gap:8px;margin-top:8px;">
-          ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="flex:0 0 auto;width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
+          ${carouselImages.map((_, i) => `<button class="carousel-dot${i===0?' active':''}" data-index="${i}" style="flex:none;width:10px;height:10px;border-radius:50%;border:none;background:var(--muted);cursor:pointer;${i===0?'background:var(--accent)':''}"></button>`).join("")}
         </div>
       </div>
 
@@ -617,10 +646,36 @@ function superProtokollView() {
         <table>
           <thead><tr><th>Wann</th><th>Wer</th><th>Aktion</th><th>Details</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>`;
+</table>`;
   }
 
-  // ---------- Shifts ----------
+  function superBackupView() {
+    return `
+      <h2>Daten-Backup</h2>
+      <div class="container" style="max-width:600px">
+        <p class="muted" style="margin-bottom:16px">
+          Hier kannst du die komplette Datenbank (Nutzer, Shifts, Dutys, Fahrzeuge, Fahrtenbuch, Anmeldungen, etc.)
+          manuell in den GitHub-<code>data</code>-Branch speichern. Das ist nützlich vor größeren Änderungen
+          oder als zusätzliche Sicherung neben dem automatischen Speichern.
+        </p>
+        <div class="spread">
+          <button class="btn btn-green" id="backup-btn" onclick="VBG.backupNow()" style="min-width:200px">
+            <span id="backup-btn-text">💾 Backup jetzt speichern</span>
+            <span id="backup-spinner" class="spinner" style="display:none;width:16px;height:16px;border-width:2px"></span>
+          </button>
+          <div id="backup-status" class="muted" style="margin-left:12px;align-self:center"></div>
+        </div>
+        <hr style="margin:16px 0">
+        <h4>Info</h4>
+        <ul class="muted" style="font-size:13px;line-height:1.6">
+          <li>Der Backup speichert <b>alle</b> Daten in den GitHub-<code>data</code>-Branch.</li>
+          <li>Voraussetzung: In Render ist <code>VBG_GITHUB_TOKEN</code> gesetzt (PAT mit <b>Contents: Write</b>).</li>
+          <li>Der <code>data</code>-Branch muss einmalig existieren (<code>git push origin HEAD:data</code>).</li>
+          <li>Automatisch wird auch bei jeder Änderung gespeichert (Debounce 3s).</li>
+          <li>Nach Deploy lädt der Server die Daten automatisch aus dem <code>data</code>-Branch.</li>
+        </ul>
+      </div>`;
+  }
   function renderShifts() {
     const shiftsReal = realShifts();
     const tpl = state.shifts.find((s) => s.id === "tpl-tagesplan");
@@ -1492,6 +1547,7 @@ function superProtokollView() {
       { id: "anmeldungen", label: "Anmeldungen" },
       { id: "activity", label: "Activity" },
       { id: "protokoll", label: "Protokoll" },
+      { id: "backup", label: "Backup" },
     ];
     const tabHtml = `<div class="tabs">${tabs.map((tb) => `<button class="tab ${state.superTab === tb.id ? "active" : ""}" onclick="VBG.setSuperTab('${tb.id}')">${tb.label}</button>`).join("")}</div>`;
     let body = "";
@@ -1500,6 +1556,7 @@ function superProtokollView() {
     else if (state.superTab === "anmeldungen") body = superAnmeldungenView();
     else if (state.superTab === "activity") body = activityAllView();
     else if (state.superTab === "protokoll") body = superProtokollView();
+    else if (state.superTab === "backup") body = superBackupView();
     return `<h2>Supervisor</h2>${tabHtml}${body}`;
   }
 
@@ -2135,6 +2192,7 @@ function superProtokollView() {
     if (tab === "anmeldungen") { loadAppsAll().then(() => render()); return; }
     if (tab === "activity") { state.actAll = null; loadActivityAll().then((r) => { state.actAll = r; render(); }); return; }
     if (tab === "protokoll") { loadSuperLog().then(() => render()); return; }
+    if (tab === "backup") { render(); return; }
     render();
   }
 
@@ -3043,7 +3101,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     acceptApp, denyApp, delApp, acceptWish, denyWish,
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
-    loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug,
+    loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug, backupNow,
     forceAssignDutyVehicle, forceAssignTripVehicle,
   };
 
