@@ -283,6 +283,22 @@ function effectiveVehicle(duty) {
   return t ? t.vehicleId : null;
 }
 
+// Erstellzeitpunkt eines Nutzers – Grundlage daf��r, dass neu angelegte Konten
+// keine Benachrichtigungen/Ansagen aus der Vergangenheit zu sehen bekommen.
+function userSince(user) {
+  if (!user) return null;
+  const t = user.createdAt ? Date.parse(user.createdAt) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+// true, wenn die Benachrichtigung am/ nach Kontoerstellung existierte
+function notOlderThanUser(notification, sinceTs) {
+  if (sinceTs == null) return true; // kein Datum bekannt -> nichts ausblenden
+  const t = Date.parse(notification && notification.createdAt);
+  if (!Number.isFinite(t)) return true; // Datum fehlt/ungueltig -> nicht ausblenden
+  return t >= sinceTs;
+}
+
 // ---------- Supervisor-Aktions-Protokoll (Audit-Log) ----------
 const SUP_LOG_CAP = 2000;
 function audit(data, actor, action, detail) {
@@ -972,6 +988,33 @@ app.delete("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
 // ---------- Fahrzeuge ----------
 
 app.get("/api/fahrzeuge", requireAuth, (req, res) => res.json({ items: db.load().fahrzeuge }));
+
+// Reihenfolge der Fahrzeuge manuell setzen (Drag & Drop im Supervisor-Tab).
+// Die Array-Reihenfolge ist gleichzeitig die Anzeigereihenfolge überall.
+app.post("/api/fahrzeuge/reorder", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const ids = req.body && req.body.ids;
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: "ids-Liste fehlt" });
+  }
+  const byId = new Map(data.fahrzeuge.map((f) => [f.id, f]));
+  const seen = new Set();
+  const next = [];
+  for (const id of ids) {
+    const f = byId.get(id);
+    if (!f) return res.status(400).json({ error: "Unbekannte Fahrzeug-ID: " + id });
+    if (seen.has(id)) continue; // Duplikate ignorieren
+    next.push(f);
+    seen.add(id);
+  }
+  // Nicht mitgeschickte Fahrzeuge behalten ihre relative Reihenfolge am Ende.
+  for (const f of data.fahrzeuge) if (!seen.has(f.id)) next.push(f);
+  data.fahrzeuge = next;
+  const namen = next.map((f) => f.wagennummer || f.typ || f.id);
+  audit(data, req.user, "Fahrzeugliste sortiert", namen.join(" – "));
+  db.save();
+  res.json({ ok: true, items: next });
+});
 
 app.post("/api/fahrzeuge", requireAuth, requireSupervisor, (req, res) => {
   const data = db.load();
@@ -2099,15 +2142,18 @@ app.post("/api/announcements", requireAuth, requireSupervisor, (req, res) => {
 
 app.get("/api/announcements/latest", requireAuth, (req, res) => {
   const data = db.load();
+  const since = userSince(req.user);
   const items = data.notifications
     .filter((n) => n.type === "announce")
     .filter((n) => {
       if (n.userId === req.user.id) return true; // eigene Ziel-Benachrichtigung
       if (!n.userId.startsWith("announce-")) return false;
       const ann = data.announcements.find((a) => a.id === n.userId.replace("announce-", ""));
-      // Dringend erreicht alle Online-Nutzer, unabhängig von der Zielgruppe
+      // Dringend erreicht alle Online-Nutzer, unabhaengig von der Zielgruppe
       return !!ann && (ann.dringend === true || (ann.zielgruppen || []).includes(req.user.role));
     })
+    // Neu angelegte Nutzer bekommen keine bereits vergangenen Ansagen
+    .filter((n) => notOlderThanUser(n, since))
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const latest = items[items.length - 1] || null;
   const unseen = latest
@@ -2125,14 +2171,17 @@ app.get("/api/announcements/latest", requireAuth, (req, res) => {
 
 app.get("/api/notifications", requireAuth, (req, res) => {
   const data = db.load();
+  const since = userSince(req.user);
   let items;
   if (req.user.role === "supervisor") {
     items = data.notifications.filter((n) => n.userId === req.user.id || n.userId === "all-supervisors" || n.userId.startsWith("announce-"));
   } else {
     items = data.notifications.filter((n) => n.userId === req.user.id);
   }
+  // Neu angelegte Nutzer sehen keine Benachrichtigungen/Ansagen aus der Vergangenheit
+  items = items.filter((n) => notOlderThanUser(n, since));
   if (req.query.onlyUnread === "1") items = items.filter((n) => !n.read);
-  items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const unread = items.filter((n) => !n.read).length;
   res.json({ notifications: items, unread });
 });

@@ -386,6 +386,7 @@
       <div id="announce-banner"></div>
       <main>${renderView()}</main>`;
     renderTopbarBadge();
+    initFahrzeugDnd();
   }
 
   function renderForcePasswordChange() {
@@ -1440,14 +1441,17 @@ function superProtokollView() {
         </div>
       ` : ""}
       <div class="container">
-        <table>
+        ${canEdit ? `<p class="muted" style="margin:0 0 10px">Reihenfolge der Busse per Drag&nbsp;&amp;&nbsp;Drop an der linken Spalte ändern.</p>` : ""}
+        <table id="fzTable">
           <thead><tr>
+            ${canEdit ? `<th style="width:34px"></th>` : ""}
             <th>Wagennummer</th><th>Kennzeichen</th><th>Typ</th><th>Status</th><th>Ort</th><th>Bemerkung</th>
             ${canEdit ? `<th>Aktionen</th>` : ""}
           </tr></thead>
-          <tbody>
+          <tbody id="fzBody">
             ${fzs.length ? fzs.map((f) => `
-              <tr>
+              <tr draggable="${canEdit ? "true" : "false"}" data-fz-id="${f.id}">
+                ${canEdit ? `<td class="fz-drag" title="Zum Verschieben ziehen">⠿</td>` : ""}
                 <td>${h(f.wagennummer || "–")}</td>
                 <td>${h(f.kennzeichen || "–")}</td>
                 <td>${h(f.typ || "–")}</td>
@@ -1459,11 +1463,78 @@ function superProtokollView() {
                   <button class="btn btn-danger btn-xs" onclick="VBG.deleteFahrzeug('${f.id}')">Löschen</button>
                 </td>` : ""}
               </tr>
-            `).join("") : `<tr><td colspan="7" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
+            `).join("") : `<tr><td colspan="${canEdit ? 8 : 7}" class="muted">Keine Fahrzeuge angelegt.</td></tr>`}
           </tbody>
         </table>
       </div>
       <div id="fz-form"></div>`;
+  }
+
+  // Drag & Drop: Fahrzeuge im Supervisor-Tab per Zeile verschieben
+  function initFahrzeugDnd() {
+    const body = document.getElementById("fzBody");
+    if (!body) return;
+    let dragId = null;
+
+    body.querySelectorAll("tr[draggable='true']").forEach((tr) => {
+      tr.addEventListener("dragstart", (e) => {
+        dragId = tr.getAttribute("data-fz-id");
+        tr.classList.add("fz-dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          try { e.dataTransfer.setData("text/plain", dragId); } catch (err) {}
+        }
+      });
+      tr.addEventListener("dragend", () => {
+        tr.classList.remove("fz-dragging");
+        body.querySelectorAll("tr").forEach((r) => r.classList.remove("fz-over", "fz-over-top"));
+        dragId = null;
+      });
+      tr.addEventListener("dragover", (e) => {
+        if (!dragId || tr.getAttribute("data-fz-id") === dragId) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        const r = tr.getBoundingClientRect();
+        const oben = (e.clientY - r.top) < r.height / 2;
+        tr.classList.toggle("fz-over-top", oben);
+        tr.classList.toggle("fz-over", !oben);
+      });
+      tr.addEventListener("dragleave", () => tr.classList.remove("fz-over", "fz-over-top"));
+      tr.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const zielId = tr.getAttribute("data-fz-id");
+        tr.classList.remove("fz-over", "fz-over-top");
+        if (!dragId || !zielId || dragId === zielId) return;
+        const r = tr.getBoundingClientRect();
+        const oben = (e.clientY - r.top) < r.height / 2;
+        const rows = Array.from(body.querySelectorAll("tr[data-fz-id]"));
+        const ziel = rows.find((x) => x.getAttribute("data-fz-id") === zielId);
+        const quelle = rows.find((x) => x.getAttribute("data-fz-id") === dragId);
+        if (!ziel || !quelle) return;
+        if (oben) body.insertBefore(quelle, ziel);
+        else body.insertBefore(quelle, ziel.nextSibling);
+        saveFahrzeugOrder();
+      });
+    });
+  }
+
+  async function saveFahrzeugOrder() {
+    const ids = Array.from(document.querySelectorAll("#fzBody tr[data-fz-id]"))
+      .map((tr) => tr.getAttribute("data-fz-id"));
+    if (!ids.length) return;
+    const vorher = state.fahrzeuge;
+    // lokal sofort neu sortieren, damit die UI ohne Flackern stimmt
+    const map = new Map((state.fahrzeuge || []).map((f) => [f.id, f]));
+    state.fahrzeuge = ids.map((id) => map.get(id)).filter(Boolean);
+    try {
+      const r = await api("POST", "/api/fahrzeuge/reorder", { ids });
+      state.fahrzeuge = r.items || state.fahrzeuge;
+      toast("Reihenfolge gespeichert", "ok");
+    } catch (e) {
+      state.fahrzeuge = vorher;
+      toast(e.message, "err");
+      render();
+    }
   }
 
   function createFahrzeug() {
