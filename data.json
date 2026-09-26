@@ -63398,20 +63398,7 @@
     }
   ],
   "wishes": [],
-  "applications": [
-    {
-      "id": "7ee4d106-94e2-4926-811f-4327f9c65146",
-      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
-      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
-      "von": "18:00",
-      "bis": "21:00",
-      "art": "kundenservice",
-      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
-      "hinweis": "TEST",
-      "status": "accepted",
-      "createdAt": "2026-09-26T12:16:26.561Z"
-    }
-  ],
+  "applications": [],
   "kundenservice": [
     {
       "id": "4c8db131-e293-47a3-a91e-c21d46b76026",
@@ -64133,6 +64120,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2505",
       "createdAt": "2026-09-26T12:39:20.249Z"
+    },
+    {
+      "id": "cf0b6804-aa00-44a6-8480-6e8dd717f960",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Anmeldung gelöscht",
+      "detail": "Lkw448 · kundenservice",
+      "createdAt": "2026-09-26T13:23:02.601Z"
     }
   ],
   "_vapid": {
