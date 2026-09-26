@@ -1225,7 +1225,7 @@ function superProtokollView() {
       ${gefaehrdetHtml}
       <div class="container">
         <table>
-          <thead><tr><th>Nutzer</th><th>Rolle</th><th>Reine Fahrzeit</th><th>Activity (60 %)</th><th>Anmeldungen</th></tr></thead>
+          <thead><tr><th>Nutzer</th><th>Rolle</th><th>Reine Fahrzeit</th><th>Activity (60 %)</th><th>Anmeldungen</th>${isSup() ? "<th></th>" : ""}</tr></thead>
           <tbody>
             ${rows.rows.map((r) => `
               <tr>
@@ -1234,6 +1234,7 @@ function superProtokollView() {
                 <td>${fmtMin(r.fahrMin || 0)}</td>
                 <td>${fmtMin(r.activityMin || 0)}</td>
                 <td>${r.signups || 0}</td>
+                ${isSup() ? `<td><button class="btn btn-danger btn-xs" onclick="VBG.deleteActivity('${r.id}')" title="Activity-Eintrag löschen">🗑</button></td>` : ""}
               </tr>`).join("")}
           </tbody>
         </table>
@@ -2554,6 +2555,15 @@ function superProtokollView() {
       render();
     } catch (e) { toast(e.message, "err"); }
   }
+  async function deleteActivity(id) {
+    if (!confirm("Activity-Eintrag wirklich löschen?")) return;
+    try {
+      await api("DELETE", "/api/activity/" + id);
+      toast("Activity-Eintrag gelöscht", "ok");
+      await loadActivityAll();
+      render();
+    } catch (e) { toast(e.message, "err"); }
+  }
 
   // ---- Supervisor: Nutzer ----
   function showUserForm() {
@@ -3102,7 +3112,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     assignTrip, assignTripVehicle, toggleTripCancel, toggleTripEdit, toggleStopCancel, addStop,
     submitAnmeldung, withdrawApp,
     addStandort, renameStandort, delStandort,
-    signupActivity,
+    signupActivity, deleteActivity,
     showUserForm, createUser, copyPwResult, editUser, saveUserEdit, strafe, resetPw, toggleSuspend, deleteUser,
     fristMonate, fristEntfernen, fristSetzen, fristSaveModal,
     showLinieForm, createLinie, editLinie, saveLinie, delLinie,

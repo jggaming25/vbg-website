@@ -1958,19 +1958,75 @@ app.post("/api/activity/signup", requireAuth, (req, res) => {
   const user = req.user;
   const proUser = fahrZeitData();
   const me = proUser[user.id];
-  // 60% der gesamten Shift-Zeit (spanneMin) müssen reine Fahrzeit (fahrMin) sein
-  const fahrMin = me.fahrMin || 0;
-  const spanneMin = me.spanneMin || 0;
-  const threshold = Math.round(spanneMin * 0.6);
-  if (!me || fahrMin < threshold) {
-    const noch = Math.max(0, threshold - fahrMin);
-    return res.status(400).json({ error: `Mindestens ${fmtMin(threshold)} reine Fahrzeit nötig (60 % der gesamten Shift-Zeit ${fmtMin(spanneMin)}). Noch ${fmtMin(noch)} fehlen.` });
+  
+  // Find user's active/upcoming shift to check shift start time
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const userShifts = data.shifts.filter((s) => {
+    if (!s.date || s.cancelled) return false;
+    const assignedDuty = data.duties.find((d) => d.shiftId === s.id && d.assignedUserId === user.id);
+    return assignedDuty && s.date >= today;
+  }).sort((a, b) => (a.date + " " + (a.startTime || "")).localeCompare(b.date + " " + (b.startTime || "")));
+  
+  if (!me) {
+    return res.status(400).json({ error: "Keine Fahrzeitdaten verfügbar" });
   }
+  
+  const fahrMin = me.fahrMin || 0;
+  const fahrMin60 = Math.round(fahrMin * 0.6);
+  
+  // Check if any shift has started and 60% of driving time has elapsed
+  let canSignup = false;
+  let errorMsg = "";
+  
+  for (const shift of userShifts) {
+    if (!shift.date || !shift.startTime) continue;
+    const shiftStart = new Date(shift.date + "T" + shift.startTime);
+    const shiftStartMs = shiftStart.getTime();
+    const nowMs = now.getTime();
+    
+    if (nowMs < shiftStartMs) {
+      // Shift hasn't started yet
+      continue;
+    }
+    
+    // Shift has started - check if 60% of driving time has elapsed
+    const fahrMinMs = (me.fahrMin || 0) * 60 * 1000;
+    const thresholdMs = shiftStartMs + Math.round(fahrMinMs * 0.6);
+    
+    if (nowMs >= thresholdMs) {
+      canSignup = true;
+      break;
+    } else {
+      const waitMs = thresholdMs - nowMs;
+      const waitMin = Math.ceil(waitMs / 60000);
+      errorMsg = `Shift hat begonnen, aber 60% der Fahrzeit (${fmtMin(Math.round((me.fahrMin || 0) * 0.6))}) noch nicht erreicht. Noch ${waitMin} Min warten.`;
+    }
+  }
+  
+  if (!canSignup) {
+    if (!errorMsg) {
+      errorMsg = "Keine aktive/bevorstehende Shift gefunden oder Shift noch nicht gestartet.";
+    }
+    return res.status(400).json({ error: errorMsg });
+  }
+  
   data.activity.push({
     id: uid(), userId: user.id,
     von: von || new Date().toISOString().slice(0, 16),
     createdAt: new Date().toISOString(),
   });
+  db.save();
+  res.json({ ok: true });
+});
+
+// Supervisor: Activity-Eintrag löschen
+app.delete("/api/activity/:id", requireAuth, requireSupervisor, (req, res) => {
+  const data = db.load();
+  const idx = data.activity.findIndex((a) => a.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Activity-Eintrag nicht gefunden" });
+  data.activity.splice(idx, 1);
+  audit(data, req.user, "Activity gelöscht", req.params.id);
   db.save();
   res.json({ ok: true });
 });
