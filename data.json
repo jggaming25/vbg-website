@@ -63408,7 +63408,7 @@
       "art": "kundenservice",
       "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
       "hinweis": "TEST",
-      "status": "pending",
+      "status": "accepted",
       "createdAt": "2026-09-26T12:16:26.561Z"
     }
   ],
@@ -63534,6 +63534,14 @@
       "type": "apply",
       "read": false,
       "createdAt": "2026-09-26T12:16:26.736Z"
+    },
+    {
+      "id": "274b78c2-8501-4763-93f7-2ebf59c4991d",
+      "userId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "message": "Deine Anmeldung wurde angenommen.",
+      "type": "success",
+      "read": false,
+      "createdAt": "2026-09-26T12:16:54.541Z"
     }
   ],
   "announcements": [
@@ -63973,6 +63981,14 @@
       "action": "Fahrzeugliste sortiert",
       "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2504 – 2505 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
       "createdAt": "2026-09-26T11:51:49.484Z"
+    },
+    {
+      "id": "bcd8bcc8-ae0b-491a-998b-e91d4880cf34",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Anmeldung angenommen",
+      "detail": "Lkw448 · kundenservice · 18:00–21:00",
+      "createdAt": "2026-09-26T12:16:54.496Z"
     }
   ],
   "_vapid": {
