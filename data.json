@@ -63380,9 +63380,59 @@
       "type": "info",
       "read": true,
       "createdAt": "2026-09-26T10:20:07.793Z"
+    },
+    {
+      "id": "fd748918-e9d7-4696-b468-2894cef61445",
+      "userId": "announce-e6c81f61-62aa-4fbe-a76c-3c9aebac16bc",
+      "message": "Tom hat sich angemeldet!",
+      "type": "announce",
+      "announcementId": "e6c81f61-62aa-4fbe-a76c-3c9aebac16bc",
+      "dringend": true,
+      "von": "jggaming2518",
+      "rang": "Supervisor",
+      "read": false,
+      "createdAt": "2026-09-26T10:56:31.831Z"
+    },
+    {
+      "id": "170fecea-8d75-4083-b75d-ee6894bcd511",
+      "userId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "message": "Tom hat sich angemeldet!",
+      "type": "announce",
+      "announcementId": "e6c81f61-62aa-4fbe-a76c-3c9aebac16bc",
+      "dringend": true,
+      "von": "jggaming2518",
+      "rang": "Supervisor",
+      "read": false,
+      "createdAt": "2026-09-26T10:56:31.831Z"
+    },
+    {
+      "id": "a79049f1-82fc-494f-ad5f-0369b3f86c8c",
+      "userId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "message": "Tom hat sich angemeldet!",
+      "type": "announce",
+      "announcementId": "e6c81f61-62aa-4fbe-a76c-3c9aebac16bc",
+      "dringend": true,
+      "von": "jggaming2518",
+      "rang": "Supervisor",
+      "read": false,
+      "createdAt": "2026-09-26T10:56:31.831Z"
     }
   ],
-  "announcements": [],
+  "announcements": [
+    {
+      "id": "e6c81f61-62aa-4fbe-a76c-3c9aebac16bc",
+      "text": "Tom hat sich angemeldet!",
+      "zielgruppen": [
+        "user",
+        "senior",
+        "supervisor"
+      ],
+      "dringend": true,
+      "von": "jggaming2518",
+      "rang": "Supervisor",
+      "createdAt": "2026-09-26T10:56:31.831Z"
+    }
+  ],
   "announcementDate": null,
   "pushSubscriptions": [
     {
@@ -63501,6 +63551,14 @@
       "action": "Passwort geändert",
       "detail": "Schwarzfahrer001",
       "createdAt": "2026-09-26T10:55:37.194Z"
+    },
+    {
+      "id": "3353f6a5-fdc7-483c-b73d-979c40cf9df9",
+      "actorId": "f3b0a65d-cf02-49ec-8c8a-3a7ea82eb930",
+      "actorName": "Jann",
+      "action": "Ansage gesendet",
+      "detail": "[Dringend] Busfahrer, Senior Busfahrer, Supervisor – Tom hat sich angemeldet!",
+      "createdAt": "2026-09-26T10:56:31.831Z"
     }
   ],
   "_vapid": {
