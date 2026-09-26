@@ -62203,26 +62203,6 @@
       "_lastStopKey": "8_bg_bd"
     },
     {
-      "id": "1413cff2-bb0d-4afc-806e-2e90d8b2c442",
-      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
-      "linieId": "linN1",
-      "kurs": "",
-      "name": "Duty 9",
-      "vehicleId": null,
-      "startTime": "",
-      "endTime": "",
-      "notes": "",
-      "bemerkung": "",
-      "linienwechsel": "",
-      "cancelled": false,
-      "cancelNote": "",
-      "assignedUserId": null,
-      "trips": [],
-      "createdAt": "",
-      "_firstStopKey": "n1_gvz_sk",
-      "_lastStopKey": "n1_sk_gvz"
-    },
-    {
       "id": "a98b672f-41c9-45da-9e70-42cf1e060436",
       "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
       "linieId": "lin19",
@@ -63606,6 +63586,14 @@
       "action": "Ansage gesendet",
       "detail": "[Dringend] Busfahrer, Senior Busfahrer, Supervisor – Tom hat sich angemeldet!",
       "createdAt": "2026-09-26T10:56:31.831Z"
+    },
+    {
+      "id": "d0468836-e57b-4cc3-b480-cf35742340e8",
+      "actorId": "5acde28e-7789-493d-835b-6ce681929c59",
+      "actorName": "Zentrum der Arbeit",
+      "action": "Duty gelöscht",
+      "detail": "Duty 9",
+      "createdAt": "2026-09-26T10:58:54.423Z"
     }
   ],
   "_vapid": {
