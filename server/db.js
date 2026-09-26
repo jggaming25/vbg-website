@@ -40,6 +40,7 @@ function emptyStore() {
     fahrtenbuch: [], // Fahrtenbuch-Einträge (manuell, pro Fahrzeug)
     supervisorLog: [], // Protokoll aller Supervisor-Aktionen
     announcementDate: null,
+    maintenance: { enabled: false, reason: "", setBy: null, setAt: null }, // Wartungsmodus
   };
 }
 
@@ -157,6 +158,7 @@ function shapeAndMigrate(db) {
   if (!db.fahrtenbuch) db.fahrtenbuch = [];
   if (!db.supervisorLog) db.supervisorLog = [];
   if (db.announcementDate === undefined) db.announcementDate = null;
+  if (!db.maintenance) db.maintenance = { enabled: false, reason: "", setBy: null, setAt: null };
 
   // Migration älterer Felder
   db.users.forEach((u) => {

@@ -1958,8 +1958,8 @@ app.post("/api/activity/signup", requireAuth, (req, res) => {
   const user = req.user;
   const proUser = fahrZeitData();
   const me = proUser[user.id];
-  if (!me || me.fahrMin < 60) {
-    return res.status(400).json({ error: "Mindestens 1 Stunde reine Fahrzeit nötig (60 % werden für Activity angerechnet)" });
+  if (!me || (me.activityMin || 0) < 60) {
+    return res.status(400).json({ error: "Mindestens 60 Minuten Activity-Zeit nötig (entspricht 100 Min reiner Fahrzeit, 60 % werden angerechnet)" });
   }
   data.activity.push({
     id: uid(), userId: user.id,

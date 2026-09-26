@@ -1165,10 +1165,10 @@ function superProtokollView() {
           <div class="lbl">Monatsziel (mind. ${fmtMin(MOENTLICHES_ZIEL)} gefahrene Zeit)${monOk ? " – erreicht" : ` – noch ${fmtMin(monRest)}`}</div></div>
       </div>
       <div class="container">
-        <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten reine Fahrzeit
-        (ohne Pausen) erreicht hast – darauf bekommst du 60&nbsp;% als Activity-Zeit angerechnet.</p>
+        <p class="muted">Du kannst dich für Activity anmelden, sobald du mindestens 60&nbsp;Minuten Activity-Zeit
+        (entspricht 100 Min reiner Fahrzeit, 60&nbsp;% werden angerechnet) erreicht hast.</p>
         <button class="btn btn-yellow" ${bereit ? "" : "disabled"} onclick="VBG.signupActivity()">
-          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (braucht 60 min Fahrzeit)"}
+          ${bereit ? "Für Activity anmelden" : "Noch nicht verfügbar (braucht 60 min Activity-Zeit)"}
         </button>
       </div>`;
   }
