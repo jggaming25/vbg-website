@@ -114,16 +114,6 @@
   ],
   "fahrzeuge": [
     {
-      "id": "4ff327c0-655b-4100-9915-2d12ddb10246",
-      "wagennummer": "2003",
-      "kennzeichen": "GV-VB 2003",
-      "typ": "Bus",
-      "art": "Solo",
-      "status": "einsatzbereit",
-      "ort": "Betriebshof Gravenberg",
-      "bemerkung": ""
-    },
-    {
       "id": "13581d84-16e5-4226-8807-47df962d150b",
       "wagennummer": "2088",
       "kennzeichen": "-",
@@ -132,6 +122,16 @@
       "status": "sonderfahrzeug",
       "ort": "Bth Neuenburg",
       "bemerkung": "Sonderfahrzeug (derzeit nicht einsatzbereit)"
+    },
+    {
+      "id": "4ff327c0-655b-4100-9915-2d12ddb10246",
+      "wagennummer": "2003",
+      "kennzeichen": "GV-VB 2003",
+      "typ": "Bus",
+      "art": "Solo",
+      "status": "einsatzbereit",
+      "ort": "Betriebshof Gravenberg",
+      "bemerkung": ""
     },
     {
       "id": "f05606d0-3449-4189-b096-b36f164a41b8",
@@ -64029,6 +64029,14 @@
       "action": "Fahrzeugliste sortiert",
       "detail": "2003 – 2088 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2504 – 2505 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
       "createdAt": "2026-09-26T12:36:04.335Z"
+    },
+    {
+      "id": "47d55810-b94a-4d39-b108-98a5dbc96846",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeugliste sortiert",
+      "detail": "2088 – 2003 – 2004 – 2005 – 1101 – 1404 – 1102 – 1103 – 1104 – 1401 – 1402 – 1403 – 1405 – 2201 – 2202 – 2501 – 2502 – 2503 – 2504 – 2505 – 1201 – 1460 – 1461 – 1462 – 2560 – 2561 – 2605 – 2606 – Dispo – Tiguan_1 – Tiguan_2",
+      "createdAt": "2026-09-26T12:36:08.749Z"
     }
   ],
   "_vapid": {
