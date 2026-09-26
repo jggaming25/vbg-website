@@ -64732,6 +64732,72 @@
       "bis": "00:00",
       "min": 30,
       "belegtVon": null
+    },
+    {
+      "id": "f19e8674-92da-4cd8-8aca-29da7d8a8121",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "18:00",
+      "bis": "18:30",
+      "min": 30,
+      "belegtVon": null
+    },
+    {
+      "id": "45836db2-058d-4884-958a-f6053e9250cc",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "18:30",
+      "bis": "19:00",
+      "min": 30,
+      "belegtVon": null
+    },
+    {
+      "id": "0b33ff69-f321-4f92-943d-290b26633c9f",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "19:00",
+      "bis": "19:30",
+      "min": 30,
+      "belegtVon": null
+    },
+    {
+      "id": "756c97d8-bbb0-46e6-8554-e6c5092650ed",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "19:30",
+      "bis": "20:00",
+      "min": 30,
+      "belegtVon": null
+    },
+    {
+      "id": "6eb095a4-e31f-4b94-b144-75b29e72695f",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "20:00",
+      "bis": "20:30",
+      "min": 30,
+      "belegtVon": null
+    },
+    {
+      "id": "7e965894-fbf8-4a76-a1cf-d6dda238798a",
+      "standortId": "4c8db131-e293-47a3-a91e-c21d46b76026",
+      "standortName": "Gravenberg",
+      "shiftKey": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "shiftId": "8acae6a1-bfb6-4b42-acf2-c37c67568707",
+      "von": "20:30",
+      "bis": "21:00",
+      "min": 30,
+      "belegtVon": null
     }
   ],
   "ksArbeit": []
