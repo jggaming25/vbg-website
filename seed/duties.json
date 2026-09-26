@@ -25,22 +25,30 @@
     {
       "id": "lin19",
       "name": "19",
-      "label": "Linie 19"
+      "label": "Linie 19",
+      "requiredVehicleType": "Solo",
+      "requiredLicense": "Solo"
     },
     {
       "id": "lin24",
       "name": "(SB) 24",
-      "label": "Linie 24 (Schnellbus)"
+      "label": "Linie 24 (Schnellbus)",
+      "requiredVehicleType": "Gelenk",
+      "requiredLicense": "Gelenk"
     },
     {
       "id": "lin8",
       "name": "8",
-      "label": "Linie 8"
+      "label": "Linie 8",
+      "requiredVehicleType": "Solo",
+      "requiredLicense": "Solo"
     },
     {
       "id": "linN1",
       "name": "N1",
-      "label": "Linie N1 (Nacht)"
+      "label": "Linie N1 (Nacht)",
+      "requiredVehicleType": "Gelenk",
+      "requiredLicense": "Gelenk"
     }
   ],
   "fahrzeuge": [

@@ -113,6 +113,7 @@ function publicUser(u) {
     suspended: !!u.suspended,
     protected: !!u.protected,
     mustChangePassword: !!u.mustChangePassword,
+    license: u.license || "",
     createdAt: u.createdAt,
   };
 }
@@ -626,7 +627,7 @@ app.post("/api/users", async (req, res) => {
     if (u2.suspended) return res.status(403).json({ error: "Konto gesperrt" });
     if (u2.role !== "supervisor") return res.status(403).json({ error: "Nur Supervisor erlaubt" });
   }
-  const { username, role, linien } = req.body || {};
+  const { username, role, linien, license } = req.body || {};
   if (!username) return res.status(400).json({ error: "Benutzername fehlt" });
   if (data.users.some((u) => u.username.toLowerCase() === username.trim().toLowerCase())) {
     return res.status(400).json({ error: "Benutzername existiert bereits" });
@@ -639,6 +640,7 @@ app.post("/api/users", async (req, res) => {
     passwordHash: await bcrypt.hash(pw, 10),
     role: validRole,
     linien: Array.isArray(linien) ? linien : [],
+    license: license || "",
     strafstunden: 0,
     discordName: "",
     robloxName: "",
@@ -719,9 +721,10 @@ app.patch("/api/users/:id", requireAuth, requireSupervisor, async (req, res) => 
   if (user.protected && (req.body.role || req.body.linien || req.body.suspended !== undefined || req.body.strafstunden !== undefined)) {
     return res.status(403).json({ error: "Geschützter Supervisor kann hier nicht verändert werden" });
   }
-  const { role, linien, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset, strafFrist, strafFristDelta } = req.body || {};
+  const { role, linien, license, suspended, password, strafstunden, discordName, robloxName, language, avatar, displayName, displayNameReset, strafFrist, strafFristDelta } = req.body || {};
   if (role && (role === "supervisor" || DRIVER_ROLES.includes(role))) user.role = role;
   if (Array.isArray(linien)) user.linien = linien;
+  if (typeof license === "string") user.license = license;
   if (typeof suspended === "boolean") user.suspended = suspended;
   if (typeof discordName === "string") user.discordName = discordName.trim();
   if (typeof language === "string") user.language = language.trim() || "de";
@@ -906,6 +909,8 @@ app.post("/api/linien", requireAuth, requireSupervisor, (req, res) => {
     id: uid(),
     name,
     beschreibung: (req.body && req.body.beschreibung || "").trim(),
+    requiredVehicleType: req.body.requiredVehicleType || "",
+    requiredLicense: req.body.requiredLicense || "",
     stopsHin: explicitHin ? sanitizeStops(req.body.stopsHin) : sanitizeStops(dflt && dflt.stopsHin),
     stopsRueck: explicitRueck ? sanitizeStops(req.body.stopsRueck) : sanitizeStops(dflt && dflt.stopsRueck),
   };
@@ -921,6 +926,8 @@ app.patch("/api/linien/:id", requireAuth, requireSupervisor, (req, res) => {
   if (!l) return res.status(404).json({ error: "Linie nicht gefunden" });
   if (typeof req.body.name === "string") l.name = req.body.name.trim();
   if (typeof req.body.beschreibung === "string") l.beschreibung = req.body.beschreibung.trim();
+  if (typeof req.body.requiredVehicleType === "string") l.requiredVehicleType = req.body.requiredVehicleType;
+  if (typeof req.body.requiredLicense === "string") l.requiredLicense = req.body.requiredLicense;
   if (req.body.stopsHin !== undefined) l.stopsHin = sanitizeStops(req.body.stopsHin);
   if (req.body.stopsRueck !== undefined) l.stopsRueck = sanitizeStops(req.body.stopsRueck);
   audit(data, req.user, "Linie bearbeitet", l.name);
@@ -1404,7 +1411,24 @@ app.patch("/api/duties/:id", requireAuth, requireSupervisor, (req, res) => {
   if (typeof linienwechsel === "string") duty.linienwechsel = linienwechsel;
 
   // Zeiten anpassen → Fahrtenzeiten NICHT automatisch verschieben (nur §bezeichnung)
-  if (typeof vehicleId !== "undefined") duty.vehicleId = vehicleId;
+  if (typeof vehicleId !== "undefined") {
+    const force = req.body.force === true;
+    duty.vehicleId = vehicleId;
+    // Prüfen ob Fahrzeugtyp zur Linie passt
+    if (vehicleId && duty.linieId && !force) {
+      const data2 = db.load();
+      const line = data2.linien.find((l) => l.id === duty.linieId);
+      const vehicle = data2.fahrzeuge.find((f) => f.id === vehicleId);
+      if (line && line.requiredVehicleType && vehicle && vehicle.art && vehicle.art !== line.requiredVehicleType) {
+        return res.status(400).json({ 
+          error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
+          warning: true,
+          lineRequired: line.requiredVehicleType,
+          vehicleType: vehicle.art
+        });
+      }
+    }
+  }
 
   if (typeof cancelNote === "string") duty.cancelNote = cancelNote;
   if (typeof cancelled === "boolean") {
@@ -1502,7 +1526,23 @@ app.patch("/api/duties/:id/trips/:tripId", requireAuth, requireSupervisor, (req,
   if (typeof to === "string") trip.to = to;
   if (typeof dep === "string") trip.dep = dep;
   if (typeof arr === "string") trip.arr = arr;
-  if (typeof vehicleId !== "undefined") trip.vehicleId = vehicleId;
+  if (typeof vehicleId !== "undefined") {
+    const force = req.body.force === true;
+    trip.vehicleId = vehicleId;
+    // Prüfen ob Fahrzeugtyp zur Linie passt
+    if (vehicleId && duty.linieId && !force) {
+      const line = data.linien.find((l) => l.id === duty.linieId);
+      const vehicle = data.fahrzeuge.find((f) => f.id === vehicleId);
+      if (line && line.requiredVehicleType && vehicle && vehicle.art && vehicle.art !== line.requiredVehicleType) {
+        return res.status(400).json({ 
+          error: `Fahrzeugtyp "${vehicle.art}" passt nicht zur Linie ${line.name} (erforderlich: ${line.requiredVehicleType})`,
+          warning: true,
+          lineRequired: line.requiredVehicleType,
+          vehicleType: vehicle.art
+        });
+      }
+    }
+  }
   if (typeof bemerkung === "string") trip.bemerkung = bemerkung;
   if (typeof cancelNote === "string") trip.cancelNote = cancelNote;
   if (typeof cancelled === "boolean") trip.cancelled = cancelled;

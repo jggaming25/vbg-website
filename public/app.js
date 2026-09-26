@@ -2238,8 +2238,32 @@ function superProtokollView() {
   }
   async function assignDutyVehicle(dutyId, vehicleId) {
     try {
-      await api("PATCH", "/api/duties/" + dutyId, { vehicleId: vehicleId || null });
-      toast("Fahrzeug gesetzt", "ok");
+      const res = await api("PATCH", "/api/duties/" + dutyId, { vehicleId: vehicleId || null });
+      if (res.warning) {
+        const confirmOverlay = document.createElement("div");
+        confirmOverlay.className = "modal-backdrop";
+        confirmOverlay.innerHTML = `
+          <div class="modal" style="max-width:500px">
+            <h2 style="color:var(--yellow)">⚠ Fahrzeugtyp-Warnung</h2>
+            <p>${res.error}</p>
+            <p class="muted">Möchtest du das Fahrzeug trotzdem zuweisen?</p>
+            <div class="flex" style="margin-top:16px;justify-content:flex-end;gap:8px">
+              <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
+              <button class="btn btn-yellow" onclick="VBG.forceAssignDutyVehicle('${dutyId}', '${vehicleId}')">Trotzdem zuweisen</button>
+            </div>
+          </div>`;
+        document.body.appendChild(confirmOverlay);
+      } else {
+        toast("Fahrzeug gesetzt", "ok");
+        await loadPlan(); render();
+      }
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function forceAssignDutyVehicle(dutyId, vehicleId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId, { vehicleId: vehicleId || null, force: true });
+      document.querySelector(".modal-backdrop").remove();
+      toast("Fahrzeug gesetzt (Warnung ignoriert)", "ok");
       await loadPlan(); render();
     } catch (e) { toast(e.message, "err"); }
   }
@@ -2331,8 +2355,32 @@ function superProtokollView() {
   }
   async function assignTripVehicle(dutyId, tripId, vehicleId) {
     try {
-      await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { vehicleId: vehicleId || null });
-      toast("Fahrzeug gesetzt", "ok");
+      const res = await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { vehicleId: vehicleId || null });
+      if (res.warning) {
+        const confirmOverlay = document.createElement("div");
+        confirmOverlay.className = "modal-backdrop";
+        confirmOverlay.innerHTML = `
+          <div class="modal" style="max-width:500px">
+            <h2 style="color:var(--yellow)">⚠ Fahrzeugtyp-Warnung</h2>
+            <p>${res.error}</p>
+            <p class="muted">Möchtest du das Fahrzeug trotzdem zuweisen?</p>
+            <div class="flex" style="margin-top:16px;justify-content:flex-end;gap:8px">
+              <button class="btn btn-ghost" onclick="this.closest('.modal-backdrop').remove()">Abbrechen</button>
+              <button class="btn btn-yellow" onclick="VBG.forceAssignTripVehicle('${dutyId}', '${tripId}', '${vehicleId}')">Trotzdem zuweisen</button>
+            </div>
+          </div>`;
+        document.body.appendChild(confirmOverlay);
+      } else {
+        toast("Fahrzeug gesetzt", "ok");
+        await loadPlan(); render();
+      }
+    } catch (e) { toast(e.message, "err"); }
+  }
+  async function forceAssignTripVehicle(dutyId, tripId, vehicleId) {
+    try {
+      await api("PATCH", "/api/duties/" + dutyId + "/trips/" + tripId, { vehicleId: vehicleId || null, force: true });
+      document.querySelector(".modal-backdrop").remove();
+      toast("Fahrzeug gesetzt (Warnung ignoriert)", "ok");
       await loadPlan(); render();
     } catch (e) { toast(e.message, "err"); }
   }
@@ -2522,6 +2570,14 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
         <fieldset><legend>Lizenzen</legend>
           ${state.cats.linien.map((l) => `<label class="checkline"><input type="checkbox" value="${l.id}" ${(u.linien || []).includes(l.id) ? "checked" : ""}> ${h(l.name)} – ${h(l.beschreibung || "")}</label>`).join("")}
         </fieldset>
+        <fieldset><legend>Fahrerlaubnis</legend>
+          <label>Lizenz<select id="eu-license">
+            <option value="">— keine —</option>
+            <option value="Solo" ${u.license === "Solo" ? "selected" : ""}>Solo</option>
+            <option value="Gelenk" ${u.license === "Gelenk" ? "selected" : ""}>Gelenk</option>
+            <option value="Solo,Gelenk" ${u.license === "Solo,Gelenk" ? "selected" : ""}>Solo & Gelenk</option>
+          </select></label>
+        </fieldset>
         ${u.protected ? `<p class="muted" id="eu-protected-note">Geschützter Supervisor – Rolle/Lizenzen/Sperre werden hier nicht verändert.</p>` : ""}
         <div class="flex" style="margin-top:8px">
           <button class="btn btn-green" onclick="VBG.saveUserEdit('${u.id}')">Speichern</button>
@@ -2535,6 +2591,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       role: document.getElementById("eu-role").value,
       discordName: document.getElementById("eu-discord").value,
       language: document.getElementById("eu-lang").value,
+      license: document.getElementById("eu-license").value,
     };
     const rbx = document.getElementById("eu-roblox");
     if (!rbx.disabled) body.robloxName = rbx.value;
@@ -2895,11 +2952,13 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
 
   // ---------- Polling ----------
   let pollTimer = null;
+  let notifPollTimer = null;
   function startPolling() {
     if (pollTimer) clearInterval(pollTimer);
+    if (notifPollTimer) clearInterval(notifPollTimer);
+    // Main polling (60s) - for shiftplan, profile, etc.
     pollTimer = setInterval(async () => {
       if (!state.user) return;
-      await loadNotifs();
       await checkAnnouncements();
       if (state.view === "shiftplan" && state.planShiftId) {
         await loadPlan();
@@ -2911,6 +2970,11 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
       if (state.view === "fahrtenbuch") await loadFahrtenbuch();
       if (state.view === "supervisor" && state.superTab === "protokoll") await loadSuperLog();
     }, 60000);
+    // Notification polling (10s) - for real-time notifications
+    notifPollTimer = setInterval(async () => {
+      if (!state.user) return;
+      await loadNotifs();
+    }, 10000);
   }
 
   // ---------- Init ----------
@@ -2980,6 +3044,7 @@ rolle: ${h(ROLE_LABELS[role] || role)}</pre>
     saveProfile, toggleDesktop, onAvatarFile, loadStopsSuggestions,
     setFbVehicle, showFbForm, hideFbForm, saveFbEntry, editFbEntry, deleteFbEntry, openFbNew,
     loadFahrtenbuch, loadSuperLog, createFahrzeug, editFahrzeug, saveFahrzeug, deleteFahrzeug,
+    forceAssignDutyVehicle, forceAssignTripVehicle,
   };
 
   init();
