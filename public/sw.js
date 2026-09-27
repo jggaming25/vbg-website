@@ -10,7 +10,9 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let data = { title: "VBG Orga", body: "", url: "/" };
+  // "./" statt "/": aufloesbar relativ zum Scope des Service Workers, damit der
+  // Klick auf GitHub Pages (/vbg-website/) und Cloudflare Pages (/) beide stimmt.
+  let data = { title: "VBG Orga", body: "", url: "./" };
   try {
     if (event.data) data = Object.assign({}, data, event.data.json());
   } catch (e) {}
@@ -30,7 +32,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || "/";
+  const target = (event.notification.data && event.notification.data.url) || "./";
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) {

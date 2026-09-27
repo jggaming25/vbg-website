@@ -1,0 +1,49 @@
+# Cloudflare Pages – Header-Regeln
+# Statische Bandbreite ist im Free-Tarif unbegrenzt, deshalb zaehlt nur, dass
+# nicht bei jedem Aufruf volle Dateien uebertragen werden (304 = ~0 Byte).
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+# HTML immer frisch: enthaelt den Einstieg und die Datei-Verweise.
+# max-age=0 + must-revalidate -> Browser prueft den ETag, bekommt aber nur 304.
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Versionsdateien sind nicht fingerprinted -> ebenfalls nur revalidieren,
+# sonst liefert der Browser nach einem Deploy alten JavaScript aus.
+/app.js
+  Cache-Control: public, max-age=0, must-revalidate
+/style.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+# API-Ziel und Push-Key: nie cachen, sonst bleibt eine alte Konfiguration haengen.
+/config.js
+  Cache-Control: no-store
+
+# Service Worker: nur so kommen Updates beim Client an.
+/sw.js
+  Cache-Control: no-store
+
+# Manifest wird von der Installation gelesen.
+/manifest.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Bilder und Icons sind stabil und unveraendert -> lange Cache-Zeit.
+/images/*
+  Cache-Control: public, max-age=2592000
+/logo.png
+  Cache-Control: public, max-age=2592000
+/logo-square.png
+  Cache-Control: public, max-age=2592000
+/icon-32.png
+  Cache-Control: public, max-age=2592000
+/icon-180.png
+  Cache-Control: public, max-age=2592000
+/icon-192.png
+  Cache-Control: public, max-age=2592000
+/icon-512.png
+  Cache-Control: public, max-age=2592000

@@ -2259,11 +2259,11 @@ function superProtokollView() {
         return false;
       }
     }
-    // Korrekter Scope für GitHub Pages (Subpath /vbg-website/)
-    const base = window.VBG_API_BASE || "";
-    const swScope = base ? base.replace(/\/api$/, "/") : "./";
+    // Scope muss same-origin zum Script sein, sonst wirft register() einen SecurityError.
+    // Ohne expliziten Scope nutzt der Browser das Verzeichnis von sw.js – das stimmt auf
+    // GitHub Pages (/vbg-website/), Cloudflare Pages (/) und einer eigenen Domain gleichermassen.
     try {
-      const reg = await navigator.serviceWorker.register("sw.js", { scope: swScope });
+      const reg = await navigator.serviceWorker.register("sw.js");
       await navigator.serviceWorker.ready;
     } catch (e) {
       toast("Service Worker Registrierung fehlgeschlagen: " + e.message, "err");

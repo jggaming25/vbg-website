@@ -1,0 +1,10 @@
+# Cloudflare Pages – Rewrite-Regeln
+#
+# Bewusst KEIN SPA-Fallback ("/* /index.html 200").
+# Die App nutzt kein History-Routing, es gibt also keine tiefen URLs. Ein
+# Fallback wuerde bei einem Tippfehler wie /appj.js HTML statt eines 404
+# ausliefern und JavaScript-Fehler erzeugen. Fehlende Dateien sollen als 404
+# enden.
+#
+# Nachtragen, falls doch mal echte Routen dazukommen:
+#   /fahrzeuge/*   /index.html   200

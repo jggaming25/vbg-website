@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
@@ -10,6 +11,7 @@ const db = require("./db");
 const app = express();
 app.set("trust proxy", true); // Render läuft hinter Reverse-Proxy -> echte Client-IP
 app.use(cors());
+app.use(compression({ threshold: 512 }));
 app.use(express.json({ limit: "10mb" }));
 
 const SECRET = process.env.JWT_SECRET || "vbg-website-dev-secret-bitte-in-env-setzen-123456";

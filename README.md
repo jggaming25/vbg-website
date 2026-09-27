@@ -11,7 +11,7 @@ supervisor-gesteuertem Status.
 
 | Teil | Technik | Hosting |
 |---|---|---|
-| Frontend | HTML, CSS, Vanilla JS (SPA) | GitHub Pages **oder** Render |
+| Frontend | HTML, CSS, Vanilla JS (SPA) | **Cloudflare Pages** (unbegrenzte Bandbreite), alternativ GitHub Pages |
 | Backend/API | Node.js + Express | Render |
 | Daten | `data.json` (JSON-Datei, atomar geschrieben) | Render-Disk |
 
@@ -111,11 +111,70 @@ Wichtigste Environment-Variablen:
   Geheimnis und würde sonst im Klartext an jeden Besucher ausgeliefert.
   Fehlversuche sind pro Benutzer+IP auf 1 Meldung / 5 Minuten gedrosselt.
 
-### 2. GitHub Pages (Frontend)
+### 2. Frontend (Cloudflare Pages – empfohlen)
 
-In `public/config.js` die Render-URL eintragen (`window.VBG_API_BASE`). Dann in
-GitHub: **Settings → Pages → Source: „GitHub Actions"**. Der Workflow
-`.github/workflows/pages.yml` veröffentlicht `public/` bei jedem Push auf `main`.
+Das Frontend ist eine reine statische SPA und liegt deshalb am besten auf
+**Cloudflare Pages**: im Free-Tarif ist die **statische Bandbreite unbegrenzt**,
+unlimited SSL ist dabei. Damit fließt über den Render-Workflow nur noch JSON,
+nicht mehr das Frontend.
+
+In `public/config.js` die Render-URL eintragen (`window.VBG_API_BASE`, ist bereits
+auf `https://vbg-website.onrender.com` gesetzt). Dann auf
+[Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages → Create →
+Pages → Connect to Git**:
+
+| Einstellung | Wert |
+| --- | --- |
+| Framework preset | None |
+| Build command | *(leer lassen)* |
+| Build output directory | `public` |
+| Node.js version | *(wird nicht benötigt)* |
+
+Es ist **kein Build-Schritt** nötig, `public/` wird direkt ausgeliefert. Anschließend
+im Pages-Projekt unter **Custom domains** die eigene Domain eintragen; DNS und
+Zertifikat übernimmt Cloudflare.
+
+Zwei Konfigurationsdateien in `public/` steuern das Verhalten:
+
+- `_headers` – Cache-Regeln. `app.js`/`style.css` sind nicht fingerprinted und
+  werden deshalb nur revalidiert (`max-age=0, must-revalidate`): Der Browser holt
+  beim nächsten Aufruf einen 304, überträgt aber keine Datei erneut. `config.js`
+  und `sw.js` stehen auf `no-store`, damit alte API-URLs und alte
+  Service-Worker-Versionen nicht hängen bleiben.
+- `_redirects` – bewusst **ohne** SPA-Fallback. Die App nutzt kein
+  History-Routing, fehlende Dateien sollen als 404 enden.
+
+**CORS ist bereits passend:** `server.js` ruft `app.use(cors())` ohne
+Origin-Beschränkung, und der Browser sendet `Authorization: Bearer` ohne
+Credentials. Eine andere Frontend-Origin (`*.pages.dev`, eigene Domain) darf die
+API daher direkt ansprechen.
+
+**Warum das Backend auf Workers Free nicht in Frage kommt:** dort sind 10 ms
+CPU-Zeit pro Aufruf erlaubt, ein `bcrypt`-Vergleich braucht aber 90–130 ms. Dazu
+gibt es kein beschreibbares Dateisystem für `data.json`. Die API bleibt darum auf
+Render (siehe Kompression unten).
+
+### 3. GitHub Pages (Alternative)
+
+Funktioniert weiterhin: **Settings → Pages → Source: „GitHub Actions"**. Der
+Workflow `.github/workflows/pages.yml` veröffentlicht `public/` bei jedem Push auf
+`main`. Limit: 100 GB/Monat statt unbegrenzt.
+
+### Bandbreite des Backends (Render Free, 5 GB/Monat)
+
+`server.js` setzt `compression` (gzip/Brotli) mit Schwelle 512 Byte. Gemessen an
+einem realistischen Datensatz mit Duties, Schichten und Anmeldungen:
+
+| | ohne Kompression | mit Kompression |
+| --- | --- | --- |
+| `/api/applications` | 25.396 B | 1.419 B (−94 %) |
+| `/api/shifts` | 12.474 B | 514 B (−96 %) |
+| `/api/users` | 18.996 B | 786 B (−96 %) |
+| **Summe eines vollen Syncs** | **56,0 KB** | **3,1 KB (−94,5 %)** |
+
+Hochrechnung bei 40 Nutzern × 60 Aufrufe/Tag: **3,84 GB → 0,21 GB** pro Monat.
+Damit ist das 5-GB-Limit nicht mehr die kritische Größe – die App läuft im
+Free-Tarif durch.
 
 ## Projektstruktur
 
@@ -128,8 +187,9 @@ seed/
   duties.json      Tagesplan-Daten (Shift tpl-tagesplan)
 public/            Frontend (SPA)
   index.html, style.css, app.js, api.js, config.js, manifest.webmanifest
+  _headers, _redirects   Cloudflare-Pages-Regeln (Cache + Rewrites)
 render.yaml        Render-Blueprint
-.github/workflows/pages.yml   GitHub-Pages-Deploy
+.github/workflows/pages.yml   GitHub-Pages-Deploy (Alternative)
 data.json          Daten (wird automatisch angelegt)
 ```
 
