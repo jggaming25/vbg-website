@@ -160,21 +160,63 @@ Funktioniert weiterhin: **Settings → Pages → Source: „GitHub Actions"**. D
 Workflow `.github/workflows/pages.yml` veröffentlicht `public/` bei jedem Push auf
 `main`. Limit: 100 GB/Monat statt unbegrenzt.
 
-### Bandbreite des Backends (Render Free, 5 GB/Monat)
+### Bandbreite des Backends (Render)
 
-`server.js` setzt `compression` (gzip/Brotli) mit Schwelle 512 Byte. Gemessen an
-einem realistischen Datensatz mit Duties, Schichten und Anmeldungen:
+Render Free (Hobby) liefert seit 23.04.2026 **5 GB/Monat** inklusive, danach
+$0,15/GB. Ohne hinterlegte Zahlungsmethode wird der Service bei Überschreitung
+**suspendiert** – mit Karte wird der Überhang abgerechnet.
+
+`server.js` setzt `compression` (gzip/Brotli) mit Schwelle 512 Byte. Für reine
+JSON-Antworten wirkt das stark:
 
 | | ohne Kompression | mit Kompression |
 | --- | --- | --- |
 | `/api/applications` | 25.396 B | 1.419 B (−94 %) |
 | `/api/shifts` | 12.474 B | 514 B (−96 %) |
-| `/api/users` | 18.996 B | 786 B (−96 %) |
 | **Summe eines vollen Syncs** | **56,0 KB** | **3,1 KB (−94,5 %)** |
 
-Hochrechnung bei 40 Nutzern × 60 Aufrufe/Tag: **3,84 GB → 0,21 GB** pro Monat.
-Damit ist das 5-GB-Limit nicht mehr die kritische Größe – die App läuft im
-Free-Tarif durch.
+**Der eigentliche Verbraucher waren jedoch die Profilbilder.** `publicUser()`
+hatte das Avatar-Bild als Base64-Data-URL in *jede* Nutzerliste eingebettet, und
+diese Serializer-Funktion wird an 11 Stellen verwendet. Bei vier Nutzern mit drei
+Bildern (Ø 202 KB, größtes 340 KB) wurde ein einzelner `/api/users`-Aufruf
+**605 KB** groß – davon waren **99,9 %** Base64. Die 5 GB waren damit nach
+**8.657 Aufrufen** von `/api/users` erreicht, nicht nach Millionen.
+
+Gzip allein half nur wenig: Base64 ist Hochentropie, die Kompression brachte
+gerade **24,7 %** (605,6 KB → 455,8 KB).
+
+Deshalb liefert `publicUser()` jetzt nur noch `hasAvatar: true`. Die Bilddaten
+holt der Client einmalig über den geschützten Endpunkt
+
+```
+GET /api/avatar/:id          (requireAuth)
+  Cache-Control: private, max-age=2592000
+  ETag: <sha1 des Bildes>    -> 304 statt 200 KB bei Revalidierung
+```
+
+Das Frontend lädt das Bild per `fetch()` mit Token als Blob, hält eine
+Object-URL pro Sitzung und lässt die Initialen stehen, bis es da ist. Schlägt
+der Abruf fehl, bleibt der Buchstaben-Kreis stehen.
+
+Gemessen mit echten Produktionsbildern:
+
+| | vorher | nachher |
+| --- | --- | --- |
+| `/api/users` (4 Nutzer, 3 Bilder) | 605,6 KB | **4,5 KB** |
+| gzip davon | 455,8 KB | 0,5 KB |
+
+Hochrechnung 15–20 Nutzer × 50–70 Aufrufe/Tag:
+
+| Szenario | Aufrufe/Monat | Verbrauch | Anteil am 5-GB-Limit |
+| --- | --- | --- | --- |
+| 15 Nutzer × 50 | 22.500 | ~16 MB | 0,3 % |
+| 18 Nutzer × 60 | 32.400 | ~22 MB | 0,4 % |
+| 20 Nutzer × 70 | 42.000 | ~28 MB | 0,5 % |
+
+**Wichtig für neue Felder:** Wer Binärdaten (Bilder, PDFs) in `data.json`
+speichert, darf sie nicht in Listen-Serialisern einbetten. Entweder ein Flag
+zurückgeben und über einen eigenen Endpunkt mit Cache-Header ausliefern, oder
+extern ablegen.
 
 ## Projektstruktur
 

@@ -113,7 +113,10 @@ function publicUser(u) {
     strafFristBis: u.strafFristBis || null,
     strafFristAuto: !!u.strafFristAuto,
     language: u.language || "de",
-    avatar: u.avatar || "",
+    // Avatare nicht einbetten: Base64-Bilder machten jede Nutzerliste ~600 KB
+    // gross und haben den 5-GB-Transfer von Render verbraucht. Stattdessen nur
+    // das Flag; die Bilddaten holt der Client einmalig über /api/avatar/:id.
+    hasAvatar: !!u.avatar,
     suspended: !!u.suspended,
     protected: !!u.protected,
     mustChangePassword: !!u.mustChangePassword,
@@ -774,6 +777,33 @@ app.post("/api/backup/manual", requireAuth, requireSupervisor, async (req, res) 
 
 app.get("/api/users", requireAuth, requireSupervisor, (req, res) => {
   res.json({ users: db.load().users.map(publicUser) });
+});
+
+// Avatar als eigenes Binary. Bewusst hinter requireAuth und mit langem
+// privatem Cache: der Browser laedt jedes Bild nur einmal in 30 Tagen nach,
+// danach revalidiert er per ETag (304 statt 200 KB).
+app.get("/api/avatar/:id", requireAuth, (req, res) => {
+  const u = db.load().users.find((x) => x.id === req.params.id);
+  const m = u && typeof u.avatar === "string"
+    ? u.avatar.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/)
+    : null;
+  if (!m) return res.status(404).json({ error: "Kein Bild" });
+
+  let bin;
+  try {
+    bin = Buffer.from(m[2], "base64");
+  } catch (e) {
+    return res.status(404).json({ error: "Kein Bild" });
+  }
+  if (!bin.length) return res.status(404).json({ error: "Kein Bild" });
+
+  const etag = '"' + crypto.createHash("sha1").update(bin).digest("hex") + '"';
+  res.set("ETag", etag);
+  res.set("Cache-Control", "private, max-age=2592000");
+  if (req.headers["if-none-match"] === etag) return res.status(304).end();
+  res.set("Content-Type", m[1]);
+  res.set("Content-Length", String(bin.length));
+  res.end(bin);
 });
 
 // Öffentliche / eigene Informationen (auch für Fahrer für den Account-Tab)

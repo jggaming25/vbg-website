@@ -606,17 +606,54 @@
     </header>`;
   }
 
+  // Avatare werden nicht mehr als Base64 in jeder Nutzerliste mitgeschickt – das
+  // waren rund 600 KB pro Response und haben das Render-Transferlimit gefuellt.
+  // Der Server liefert nur noch hasAvatar; die Bilddaten holt der Client einmalig
+  // ueber /api/avatar/:id (mit Token), cacht sie als Blob-URL und der Browser
+  // behaelt das Bild 30 Tage im HTTP-Cache.
+  const avatarBlobs = new Map();
+
   function avatarLetter(u) {
-    if (u && u.avatar && u.avatar.indexOf("data:image") !== 0) return u.avatar.slice(0, 1).toUpperCase();
+    if (u && !u.hasAvatar && u.avatar) return String(u.avatar).slice(0, 1).toUpperCase();
     return ((u && u.username) || "?").slice(0, 1).toUpperCase();
+  }
+
+  async function loadAvatarBlob(id) {
+    const token = Auth.getToken();
+    const res = await fetch((window.VBG_API_BASE || "") + "/api/avatar/" + encodeURIComponent(id), {
+      headers: token ? { Authorization: "Bearer " + token } : {},
+    });
+    if (!res.ok) return "";
+    const blob = await res.blob();
+    return blob && blob.size ? URL.createObjectURL(blob) : "";
+  }
+
+  function avatarObjectUrl(id) {
+    if (!id) return "";
+    const hit = avatarBlobs.get(id);
+    if (hit !== undefined) return hit; // "" = lädt gerade, kein zweiter Abruf
+    avatarBlobs.set(id, "");
+    loadAvatarBlob(id)
+      .then((url) => {
+        if (!url) { avatarBlobs.delete(id); return; } // späterer Versuch erneut möglich
+        avatarBlobs.set(id, url);
+        document.querySelectorAll('img[data-avatar="' + id + '"]').forEach((el) => {
+          el.src = url;
+          el.style.display = "block";
+        });
+      })
+      .catch(() => { avatarBlobs.delete(id); });
+    return "";
   }
 
   // Avatar als <img> (bei hochgeladenem Bild) oder Buchstaben-Kreis
   function avatarHtml(u, cls = "", style = "") {
     const clsAttr = cls ? `avatar ${cls}` : "avatar";
-    const img = u && u.avatar && u.avatar.indexOf("data:image") === 0;
-    if (img) {
-      return `<span class="${clsAttr}" style="overflow:hidden;padding:0${style ? ";" + style : ""}"><img src="${u.avatar}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit"/></span>`;
+    const id = u && (u.id || u.userId);
+    if (u && u.hasAvatar && id) {
+      const src = avatarObjectUrl(id);
+      const img = `<img data-avatar="${h(id)}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;${src ? "display:block" : "display:none"}"${src ? ` src="${src}"` : ""}/>`;
+      return `<span class="${clsAttr}" style="position:relative;overflow:hidden;padding:0${style ? ";" + style : ""}">${h(avatarLetter(u))}${img}</span>`;
     }
     return `<span class="${clsAttr}"${style ? ` style="${style}"` : ""}>${h(avatarLetter(u))}</span>`;
   }
@@ -3485,12 +3522,15 @@ async function acceptApp(id) {
     if (!rbx.disabled) body.robloxName = robloxName;
     const dn = document.getElementById("acc-displayname");
     if (dn && !dn.disabled) body.displayName = dn.value;
+    const avatarChanged = !!pendingAvatar;
     if (pendingAvatar) { body.avatar = pendingAvatar; pendingAvatar = null; }
     try {
       await api("PATCH", "/api/me/profile", body);
       toast("Profil gespeichert", "ok");
       document.documentElement.lang = language === "en" ? "en" : "de";
       state.user.language = language;
+      // Neues Bild: alte Blob-URL verwerfen, damit nicht das alte Bild bleibt.
+      if (avatarChanged && state.user && state.user.id) avatarBlobs.delete(state.user.id);
       await loadProfile();
       render();
     } catch (e) { toast(e.message, "err"); }
@@ -3559,6 +3599,10 @@ async function acceptApp(id) {
   function doLogout() {
     try { api("POST", "/api/auth/logout"); } catch (e) {}
     Auth.clear();
+    // Blob-URLs freigeben: sie sind an diesen Login gebunden und bleiben sonst
+    // bis zum Reload im Speicher.
+    avatarBlobs.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+    avatarBlobs.clear();
     state.user = null;
     state.plan = null;
     state.myApps = [];
