@@ -128,9 +128,9 @@
       "wagennummer": "2003",
       "kennzeichen": "GV-VB 2003",
       "typ": "Bus",
-      "art": "",
+      "art": "Solo",
       "status": "einsatzbereit",
-      "ort": "Betriebshof Gravenberg",
+      "ort": "Gravenberg Betriebshof Süd",
       "bemerkung": ""
     },
     {
@@ -64397,6 +64397,14 @@
       "action": "Anmeldung gelöscht",
       "detail": "jggaming2518 · kundenservice",
       "createdAt": "2026-09-26T22:35:13.427Z"
+    },
+    {
+      "id": "895335c3-529f-4dfb-bd61-2dc33e5e7770",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "2003",
+      "createdAt": "2026-09-27T09:19:59.988Z"
     }
   ],
   "_vapid": {
