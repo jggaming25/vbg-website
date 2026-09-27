@@ -158,9 +158,9 @@
       "wagennummer": "1101",
       "kennzeichen": "GV-VB 1101",
       "typ": "Bus",
-      "art": "",
+      "art": "Solo",
       "status": "einsatzbereit",
-      "ort": "Betriebshof Gravenberg",
+      "ort": "Gravenberg Betriebshof Süd",
       "bemerkung": "Reserve Bus"
     },
     {
@@ -64405,6 +64405,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "2003",
       "createdAt": "2026-09-27T09:19:59.988Z"
+    },
+    {
+      "id": "acc0f412-2fee-493f-aeae-c86902de12ab",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "1101",
+      "createdAt": "2026-09-27T09:20:07.870Z"
     }
   ],
   "_vapid": {
