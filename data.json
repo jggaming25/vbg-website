@@ -197,10 +197,10 @@
       "id": "9a18ed30-0649-4982-9754-02eebaeb4815",
       "wagennummer": "1104",
       "kennzeichen": "GV-VB 1104",
-      "typ": "Mercedes-Benz O530 Facelift",
+      "typ": "Bus",
       "art": "Solo",
       "status": "einsatzbereit",
-      "ort": "Betriebshof Gravenberg",
+      "ort": "Gravenberg Betriebshof Süd",
       "bemerkung": ""
     },
     {
@@ -64421,6 +64421,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "1103",
       "createdAt": "2026-09-27T09:20:25.807Z"
+    },
+    {
+      "id": "402e7af1-b456-4a54-9187-15210086b9ca",
+      "actorId": "730722eb-5f52-4389-adf2-e8f87f822fea",
+      "actorName": "𝓜𝓪𝓲𝓴 (Inhaber)",
+      "action": "Fahrzeug bearbeitet",
+      "detail": "1104",
+      "createdAt": "2026-09-27T09:20:42.691Z"
     }
   ],
   "_vapid": {
