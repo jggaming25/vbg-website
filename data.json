@@ -80,6 +80,31 @@
       "mustChangePassword": false,
       "createdAt": "2026-09-26T11:36:46.287Z",
       "passwordChangedAt": "2026-09-26T11:37:46.097Z"
+    },
+    {
+      "id": "ec6ec6b6-28f4-482f-a6fa-edf4c623d808",
+      "username": "Noobmaster9573",
+      "passwordHash": "$2a$10$MN9TVAzrylWTnLDcgvpgKeoEN3OH2y/HxG8xxGBiIGedIue7o1kbW",
+      "role": "user",
+      "linien": [
+        "lin19",
+        "lin24",
+        "lin8"
+      ],
+      "license": "",
+      "strafstunden": 0,
+      "discordName": "",
+      "robloxName": "",
+      "robloxChangedAt": null,
+      "displayName": "",
+      "displayNameChangedAt": null,
+      "strafFristBis": null,
+      "strafFristAuto": true,
+      "language": "de",
+      "avatar": "",
+      "suspended": false,
+      "mustChangePassword": true,
+      "createdAt": "2026-09-27T09:32:29.564Z"
     }
   ],
   "linien": [
