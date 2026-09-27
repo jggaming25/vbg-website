@@ -84,7 +84,7 @@
     {
       "id": "ec6ec6b6-28f4-482f-a6fa-edf4c623d808",
       "username": "Noobmaster9573",
-      "passwordHash": "$2a$10$MN9TVAzrylWTnLDcgvpgKeoEN3OH2y/HxG8xxGBiIGedIue7o1kbW",
+      "passwordHash": "$2a$10$gIy14VD6H4j9K8g4uNsukuFdoSPy4ZR50HAbnxdZKXCZwDGJEtCLS",
       "role": "user",
       "linien": [
         "lin19",
@@ -103,8 +103,9 @@
       "language": "de",
       "avatar": "",
       "suspended": false,
-      "mustChangePassword": true,
-      "createdAt": "2026-09-27T09:32:29.564Z"
+      "mustChangePassword": false,
+      "createdAt": "2026-09-27T09:32:29.564Z",
+      "passwordChangedAt": "2026-09-27T09:33:35.866Z"
     }
   ],
   "linien": [
@@ -64454,6 +64455,14 @@
       "action": "Fahrzeug bearbeitet",
       "detail": "1104",
       "createdAt": "2026-09-27T09:20:42.691Z"
+    },
+    {
+      "id": "b2c819cb-04f2-490b-b14d-f00e28b19f0f",
+      "actorId": "ec6ec6b6-28f4-482f-a6fa-edf4c623d808",
+      "actorName": "Noobmaster9573",
+      "action": "Passwort geändert",
+      "detail": "Noobmaster9573",
+      "createdAt": "2026-09-27T09:33:35.867Z"
     }
   ],
   "_vapid": {
